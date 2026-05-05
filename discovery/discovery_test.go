@@ -191,8 +191,8 @@ func TestSearchPrefixID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result (root only, subs excluded), got %d", len(results))
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
 	}
 	if results[0].ID != "github.com/user/repo" {
 		t.Errorf("expected root id, got %q", results[0].ID)
@@ -352,33 +352,5 @@ func TestRegisterUpdatesExisting(t *testing.T) {
 	}
 	if len(results[0].Tags) != 1 || results[0].Tags[0] != "new" {
 		t.Errorf("expected tags ['new'], got %v", results[0].Tags)
-	}
-}
-
-func TestSearch_ExcludesSubSkills(t *testing.T) {
-	db := connectTestDB(t)
-	d := discovery.New(db, nil)
-	ctx := context.Background()
-	freshTable(t, d, db)
-
-	d.RegisterSkill(ctx, discovery.SkillSummary{
-		ID: "github.com/test/search-root", Name: "Root", Description: "root skill",
-	})
-	d.Approve(ctx, "github.com/test/search-root")
-
-	d.RegisterSkill(ctx, discovery.SkillSummary{
-		ID: "github.com/test/search-root/sub-a", Name: "Sub A", Description: "sub skill",
-	})
-	d.Approve(ctx, "github.com/test/search-root/sub-a")
-
-	results, err := d.Search(ctx, discovery.SearchRequest{ID: "github.com/test/search-root"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 root skill, got %d: %+v", len(results), results)
-	}
-	if results[0].ID != "github.com/test/search-root" {
-		t.Errorf("expected root id, got %q", results[0].ID)
 	}
 }

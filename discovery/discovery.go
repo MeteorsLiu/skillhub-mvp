@@ -46,7 +46,6 @@ type skillModel struct {
 	Tags        string    `gorm:"type:text[];default:'{}'"`
 	Status      string    `gorm:"default:'pending'"`
 	Source      string    `gorm:"default:''"`
-	IsSub       bool      `gorm:"default:false"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -71,14 +70,11 @@ func (d *Discovery) Init(ctx context.Context) error {
 	if !d.db.Migrator().HasColumn(&skillModel{}, "status") {
 		d.db.WithContext(ctx).Exec(`ALTER TABLE skill_models ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`)
 	}
-	if !d.db.Migrator().HasColumn(&skillModel{}, "is_sub") {
-		d.db.WithContext(ctx).Exec(`ALTER TABLE skill_models ADD COLUMN is_sub BOOLEAN NOT NULL DEFAULT false`)
-	}
 	return nil
 }
 
 func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSummary, error) {
-	q := d.db.WithContext(ctx).Model(&skillModel{}).Where("status = ?", "approved").Where("is_sub = ?", false)
+	q := d.db.WithContext(ctx).Model(&skillModel{}).Where("status = ?", "approved")
 
 	if req.ID != "" {
 		q = q.Where("id = ? OR id LIKE ?", req.ID, req.ID+"/%")
@@ -141,14 +137,6 @@ func joinTags(tags []string) string {
 }
 
 func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error {
-	var isSub bool
-	var parentCount int64
-	if err := d.db.WithContext(ctx).Model(&skillModel{}).
-		Where("? LIKE id || '/%' AND id != ?", skill.ID, skill.ID).
-		Count(&parentCount).Error; err == nil && parentCount > 0 {
-		isSub = true
-	}
-
 	m := skillModel{
 		ID:          skill.ID,
 		Name:        skill.Name,
@@ -156,7 +144,6 @@ func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error
 		Version:     skill.Version,
 		Tags:        joinTags(skill.Tags),
 		Status:      "pending",
-		IsSub:       isSub,
 	}
 	return d.db.WithContext(ctx).Save(&m).Error
 }
