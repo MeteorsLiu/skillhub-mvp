@@ -131,18 +131,40 @@ func (c *mcpCore) splitSubSkill(id string) (rootID, subPath string) {
 }
 
 func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) {
+	if c.cache != nil {
+		results, err := c.cache.Search(req.Description, req.Tag, req.Limit)
+		if err == nil && len(results) > 0 {
+			return results, nil
+		}
+	}
+
 	discReq := discoveryclient.SearchRequest{
 		ID:          req.ID,
 		Description: req.Description,
 		Tag:         req.Tag,
 		Limit:       req.Limit,
 	}
-	results, err := c.client.Search(context.Background(), discReq)
+	remoteResults, err := c.client.Search(context.Background(), discReq)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]types.SkillSummary, len(results))
-	for i, r := range results {
+
+	if c.cache != nil {
+		go func() {
+			for _, r := range remoteResults {
+				c.cache.Upsert(types.SkillSummary{
+					ID:          r.ID,
+					Name:        r.Name,
+					Description: r.Description,
+					Version:     r.Version,
+					Tags:        r.Tags,
+				}, "remote")
+			}
+		}()
+	}
+
+	out := make([]types.SkillSummary, len(remoteResults))
+	for i, r := range remoteResults {
 		out[i] = types.SkillSummary{
 			ID:          r.ID,
 			Name:        r.Name,
