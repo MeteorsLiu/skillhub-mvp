@@ -1,0 +1,235 @@
+package cache_test
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"skillhub/pkg/cache"
+	"skillhub/pkg/types"
+)
+
+func TestOpen_CreatesDBAndTable(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Fatal("db file not created")
+	}
+}
+
+func TestUpsert_AffectsRow(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	err = c.Upsert(types.SkillSummary{
+		ID:          "github.com/acme/clawhub/social/publish-post",
+		Name:        "Publish Post",
+		Description: "Publish content",
+		Version:     "v1.0.0",
+		Tags:        []string{"social", "publish"},
+	}, "local")
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	results, err := c.Search("Publish", "", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "github.com/acme/clawhub/social/publish-post" {
+		t.Errorf("expected publish-post id, got %q", results[0].ID)
+	}
+	if results[0].Name != "Publish Post" {
+		t.Errorf("expected name 'Publish Post', got %q", results[0].Name)
+	}
+}
+
+func TestSearch_RegexMatch(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	c.Upsert(types.SkillSummary{
+		ID: "a", Name: "Foo", Description: "handle bar baz", Version: "v1.0.0",
+	}, "local")
+	c.Upsert(types.SkillSummary{
+		ID: "b", Name: "Quux", Description: "other stuff", Version: "v1.0.0",
+	}, "local")
+
+	results, err := c.Search("bar.*baz", "", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "a" {
+		t.Errorf("expected id 'a', got %q", results[0].ID)
+	}
+}
+
+func TestSearch_TagLikeMatch(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	c.Upsert(types.SkillSummary{
+		ID: "a", Name: "Foo", Description: "desc", Version: "v1.0.0",
+		Tags: []string{"social", "xiaohongshu"},
+	}, "local")
+
+	results, err := c.Search("", "xiaohongshu", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "a" {
+		t.Errorf("expected id 'a', got %q", results[0].ID)
+	}
+}
+
+func TestSearch_EmptyCache(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	results, err := c.Search("nonexistent", "", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestAllRootIDs(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	c.Upsert(types.SkillSummary{
+		ID: "github.com/acme/clawhub/social/publish-post", Name: "A",
+	}, "local")
+	c.Upsert(types.SkillSummary{
+		ID: "github.com/acme/clawhub/common/image-tools", Name: "B",
+	}, "local")
+
+	ids, err := c.AllRootIDs()
+	if err != nil {
+		t.Fatalf("AllRootIDs failed: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 ids, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestSyncFromFS(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	skillsDir := filepath.Join(dir, "skills", "github.com", "acme", "clawhub", "social", "publish-post", "v1.0.0")
+	os.MkdirAll(skillsDir, 0755)
+	os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(`---
+id: github.com/acme/clawhub/social/publish-post
+name: Publish Post
+description: Publish content
+tags:
+  - social
+  - publish
+---
+
+# Publish Post
+`), 0644)
+
+	c, err := cache.Open(dbPath, filepath.Join(dir, "skills"))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	results, err := c.Search("Publish", "", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result from FS sync, got %d", len(results))
+	}
+	if results[0].ID != "github.com/acme/clawhub/social/publish-post" {
+		t.Errorf("expected publish-post id, got %q", results[0].ID)
+	}
+}
+
+func TestUpsert_Update(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	c.Upsert(types.SkillSummary{
+		ID: "test", Name: "Old", Version: "v1.0.0",
+	}, "local")
+
+	c.Upsert(types.SkillSummary{
+		ID: "test", Name: "New", Version: "v2.0.0",
+	}, "remote")
+
+	results, _ := c.Search("New", "", 10)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Name != "New" {
+		t.Errorf("expected name 'New', got %q", results[0].Name)
+	}
+	if results[0].Version != "v2.0.0" {
+		t.Errorf("expected version 'v2.0.0', got %q", results[0].Version)
+	}
+}
