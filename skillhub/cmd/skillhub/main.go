@@ -234,6 +234,16 @@ func (c *mcpCore) Load(req types.LoadRequest) (*types.Skill, error) {
 			Description: extractFirstLine(skill.Body),
 			Version:     skill.Version,
 		}, "local")
+
+		for i, dep := range skill.Deps.Skills {
+			depResults, _ := c.cache.Search(dep.ID, "", 1)
+			for _, r := range depResults {
+				if r.ID == dep.ID {
+					skill.Deps.Skills[i].Name = r.Name
+					skill.Deps.Skills[i].Description = r.Description
+				}
+			}
+		}
 	}
 
 	return skill, nil
