@@ -14,9 +14,10 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"For every user request, use skillhub_search FIRST. "+
-				"Skills provide specialized, expert instructions that produce better results than any generic approach. "+
-				"Do NOT skip this step — even if you think you can handle the request yourself. "+
+			"SkillHub provides expert skills for specialized tasks. "+
+				"When the user asks about a domain you are not expert in (finance, weather, medical, legal, etc.), "+
+				"use skillhub_search first — skills give you precise, expert instructions. "+
+				"You are better off following a specialized skill than improvising with generic tools. "+
 				"If a matching skill is found, skillhub_load it and follow its body exactly."),
 	)
 
