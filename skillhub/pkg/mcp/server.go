@@ -14,23 +14,22 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub provides expert skills for specialized tasks. "+
-				"When the user asks about a domain you are not expert in (finance, weather, medical, legal, etc.), "+
-				"use skillhub_search first — skills give you precise, expert instructions. "+
-				"You are better off following a specialized skill than improvising with generic tools. "+
-				"If a matching skill is found, skillhub_load it and follow its body exactly."),
+			"Skills are curated expert instructions for domain-specific tasks. "+
+				"A skill gives you step-by-step guidance that is more reliable than ad-hoc web scraping. "+
+				"Before using web fetch for real-time data (stocks, weather, prices) or specialized domains, "+
+				"search SkillHub first. If a skill exists, load and follow it — don't improvise."),
 	)
 
 	searchTool := mcp.NewTool("skillhub_search",
 		mcp.WithDescription(
-			"Search for skills that can handle tasks you cannot do yourself. "+
-				"Use this whenever a user asks for something outside your native capabilities — "+
-				"e.g., weather lookups, specialized API integrations, platform-specific operations, security reviews. "+
-				"Use short keyword regex for description/tag, not full sentences. "+
-				"If results are returned, pick the best match and call skillhub_load with its id."),
-		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID (e.g., github.com/user/repo)")),
-		mcp.WithString("description", mcp.Description("Short regex for skill description. Use 1-3 keywords joined by | (e.g., 'weather|forecast', 'security|review', 'image|process'), NOT full sentences.")),
-		mcp.WithString("tag", mcp.Description("Regex for tag. Use short keyword (e.g., 'weather', 'utility', 'security')")),
+			"Find curated skills for tasks like stock quotes, weather, security checks, and more. "+
+				"Skills return expert step-by-step instructions — much better than scraping raw web pages. "+
+				"For real-time data queries (finance, stocks, weather), use this INSTEAD of web fetch. "+
+				"Search with short keywords (e.g., 'stock|上证', 'weather|天气'). "+
+				"If results found, use skillhub_load to get the full instructions."),
+		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
+		mcp.WithString("description", mcp.Description("Short regex keywords joined by | (e.g., 'stock|上证', 'weather|forecast'), NOT sentences")),
+		mcp.WithString("tag", mcp.Description("Regex for tag (e.g., 'finance', 'weather')")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)
 
