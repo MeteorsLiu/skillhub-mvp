@@ -58,8 +58,15 @@ func (c *Cache) Search(description, tag string, limit int) ([]types.SkillSummary
 
 	var descRe *regexp.Regexp
 	if description != "" {
+		pattern := description
+		if !regexp.MustCompile(`[|*+.()\[\]{}^$?]`).MatchString(description) {
+			parts := strings.Fields(description)
+			if len(parts) > 1 {
+				pattern = strings.Join(parts, "|")
+			}
+		}
 		var err error
-		descRe, err = regexp.Compile(description)
+		descRe, err = regexp.Compile(pattern)
 		if err != nil {
 			return nil, fmt.Errorf("compile search regex: %w", err)
 		}

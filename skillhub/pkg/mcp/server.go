@@ -14,18 +14,20 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"Skills are verified working methods — tested procedures, templates, and best practices. "+
-				"They apply to all task types. "+
-				"If you think there is even a 1% chance a verified method exists for the task, search before using other tools."),
+			"SkillHub provides instructions for interacting with external platforms, services, and APIs."),
 	)
 
 	searchTool := mcp.NewTool("skillhub_search",
 		mcp.WithDescription(
-			"Search for skills — verified working methods, tested procedures, and best practices for any task type. "+
-				"If you think there is even a 1% chance a skill might match the user's request, use this tool. "+
-				"If a matching skill exists, use skillhub_load and follow it. If none, proceed normally."),
+			"- Find skills with instructions for interacting with external platforms, services, and APIs\n"+
+				"- Skills provide verified workflows that web_search and web_fetch cannot replicate\n"+
+				"- Use skillhub_search when web tools cannot act\n"+
+				"\n"+
+				"Usage notes:\n"+
+				"  - If a matching skill exists, use skillhub_load and follow its instructions exactly\n"+
+				"  - If no matching skill is found, fall back to web_search or web_fetch"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
-		mcp.WithString("description", mcp.Description("Short pipe-joined regex keywords extracted from the user's request, NOT full sentences")),
+		mcp.WithString("description", mcp.Description("PCRE regular expression of core keywords, e.g. xiaohongshu|red|书")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)

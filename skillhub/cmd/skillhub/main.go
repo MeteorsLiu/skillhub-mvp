@@ -21,18 +21,28 @@ import (
 	"skillhub/pkg/vcs"
 )
 
+var httpAddr = flag.String("http", "", "Serve over HTTP on this address (e.g. :8398). Empty means stdio.")
+
 func main() {
 	flag.Parse()
 	args := flag.Args()
 
 	if len(args) == 0 {
-		cmdServe()
+		if *httpAddr != "" {
+			cmdServeHTTP()
+		} else {
+			cmdServe()
+		}
 		return
 	}
 
 	switch args[0] {
 	case "serve":
-		cmdServe()
+		if *httpAddr != "" {
+			cmdServeHTTP()
+		} else {
+			cmdServe()
+		}
 	case "search":
 		cmdSearch(args[1:])
 	case "load":
@@ -101,6 +111,26 @@ func cmdServe() {
 	mcpSrv := mcp.NewServer(core)
 	if err := server.ServeStdio(mcpSrv); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdServeHTTP() {
+	client := discoveryclient.New(discoveryBaseURL())
+	home := skillHubHome()
+	dbPath := filepath.Join(home, "skillhub.db")
+	skillsRoot := filepath.Join(home, "skills")
+	c, err := cachepkg.Open(dbPath, skillsRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cache init warning: %v\n", err)
+		c = nil
+	}
+	core := &mcpCore{client: client, cache: c}
+	mcpSrv := mcp.NewServer(core)
+	httpServer := server.NewStreamableHTTPServer(mcpSrv)
+	fmt.Fprintf(os.Stderr, "skillhub HTTP MCP listening on %s\n", *httpAddr)
+	if err := httpServer.Start(*httpAddr); err != nil {
+		fmt.Fprintf(os.Stderr, "MCP HTTP error: %v\n", err)
 		os.Exit(1)
 	}
 }
