@@ -59,6 +59,10 @@ func HandleRegisterSkill(ctx context.Context, t *asynq.Task, disc *Discovery) er
 		return nil
 	}
 
+	if err := disc.RegisterSkill(ctx, skill); err != nil {
+		log.Printf("worker: update metadata %s: %v", payload.ID, err)
+	}
+
 	chain := NewChainScanner()
 	chain.Add(NewRuleScanner())
 	if _, err := exec.LookPath("clamscan"); err == nil {
