@@ -14,22 +14,22 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"Skills are curated expert instructions for domain-specific tasks. "+
-				"A skill gives you step-by-step guidance that is more reliable than ad-hoc web scraping. "+
-				"Before using web fetch for real-time data (stocks, weather, prices) or specialized domains, "+
-				"search SkillHub first. If a skill exists, load and follow it — don't improvise."),
+			"Skills are installable packages that extend your capabilities with expert instructions. "+
+				"When the user asks 'how to do X', 'can you help with X', 'is there a skill for X', "+
+				"or any request where you lack built-in tools or specialized knowledge — search SkillHub first. "+
+				"If a matching skill exists, load it and follow its body exactly; it will tell you how to complete the task."),
 	)
 
 	searchTool := mcp.NewTool("skillhub_search",
 		mcp.WithDescription(
-			"Find curated skills for tasks like stock quotes, weather, security checks, and more. "+
-				"Skills return expert step-by-step instructions — much better than scraping raw web pages. "+
-				"For real-time data queries (finance, stocks, weather), use this INSTEAD of web fetch. "+
-				"Search with short keywords (e.g., 'stock|上证', 'weather|天气'). "+
-				"If results found, use skillhub_load to get the full instructions."),
+			"Search for installable skills. Use this when the user asks: "+
+				"'how to do X', 'can you do X', 'find a skill for X', "+
+				"'I need a tool for X', 'help me with X', or any request outside your native capabilities. "+
+				"Search with short keywords joined by | (e.g., 'stock|上证', 'weather|天气'). "+
+				"If results found, call skillhub_load to get step-by-step instructions."),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
-		mcp.WithString("description", mcp.Description("Short regex keywords joined by | (e.g., 'stock|上证', 'weather|forecast'), NOT sentences")),
-		mcp.WithString("tag", mcp.Description("Regex for tag (e.g., 'finance', 'weather')")),
+		mcp.WithString("description", mcp.Description("Keywords joined by | (e.g., 'stock|上证', 'weather|forecast'), NOT full sentences")),
+		mcp.WithString("tag", mcp.Description("Regex for tag (e.g., 'finance', 'social')")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)
 
