@@ -14,12 +14,12 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub is your PRIMARY knowledge source for domain-specific tasks. "+
-				"Skills contain expert instructions for finance, weather, security, social media, and other specialized domains. "+
-				"BEFORE using web fetch or any generic tool for these tasks, use skillhub_search first — "+
-				"skills give you better, more focused results than generic approaches. "+
-				"Do NOT skip skillhub_search — it is the recommended way to handle domain-specific requests. "+
-				"If a matching skill is found, skillhub_load it and follow its body exactly."),
+			"SkillHub extends your capabilities. "+
+				"When you are asked to do something and you are not sure how, "+
+				"or you lack the tools/knowledge to complete a request, "+
+				"use skillhub_search FIRST to find a relevant skill. "+
+				"If found, skillhub_load it and follow its body exactly. "+
+				"Generic tools and manual approaches should only be used when no matching skill exists."),
 	)
 
 	searchTool := mcp.NewTool("skillhub_search",
