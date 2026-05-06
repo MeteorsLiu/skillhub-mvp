@@ -14,14 +14,14 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub provides instructions for interacting with external platforms, services, and APIs."),
+			"SkillHub provides skills for external information — facts, data, news, prices."),
 	)
 
 	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
-			"- Find skills with instructions for interacting with external platforms, services, and APIs\n"+
+			"- Find skills with instructions for external information — facts, data, news, prices\n"+
 				"- Skills provide verified workflows that web_search and web_fetch cannot replicate\n"+
-				"- Use skillhub__search for capabilities beyond your built-in tools\n"+
+				"- Use skillhub__search first to find skills for external information — facts, data, news, prices\n"+
 				"\n"+
 				"Usage notes:\n"+
 				"  - If a matching skill exists, use skillhub__load and follow its instructions exactly\n"+
