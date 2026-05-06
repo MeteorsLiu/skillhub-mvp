@@ -14,20 +14,23 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub 提供按需发现和加载技能的能力。当你遇到不会做的事情、缺少工具或需要特定领域的操作指导时："+
-				"先用 skillhub_search 搜索相关技能，找到后用 skillhub_load 加载技能的完整指令，然后严格遵循技能正文（body）中的步骤执行。"+
-				"不要预判技能不存在，先搜索再判断。"),
+			"You have access to SkillHub, a skill marketplace. Skills extend your capabilities with specialized instructions. "+
+				"When a user asks you to do something that you cannot do with your built-in tools and knowledge, "+
+				"use skillhub_search to find a relevant skill, then skillhub_load to load it. "+
+				"Follow the loaded skill's body exactly. Do NOT say you can't do something without first checking SkillHub."),
 	)
 
 	searchTool := mcp.NewTool("skillhub_search",
 		mcp.WithDescription(
-			"在 SkillHub 技能市场中搜索技能。当你遇到一个任务但不知道怎么做、缺少相关工具或能力时，先搜索是否有对应技能。"+
-				"通过描述你想要完成的事情来搜索（例如「查天气」「处理图片」「代码安全检查」）。"+
-				"返回匹配技能的 id、name、description、version、tags。如果搜到结果，用 skillhub_load 加载完整指令。"),
-		mcp.WithString("id", mcp.Description("按技能 ID 精确或前缀匹配（如 github.com/user/repo）")),
-		mcp.WithString("description", mcp.Description("用自然语言描述你想做的事情，支持正则（如「天气」「查.*天气」「image.*process」）")),
-		mcp.WithString("tag", mcp.Description("按标签过滤，支持正则（如「utility」「security」）")),
-		mcp.WithNumber("limit", mcp.Description("最多返回条数，默认 20")),
+			"Search for skills that can handle tasks you cannot do yourself. "+
+				"Use this whenever a user asks for something outside your native capabilities — "+
+				"e.g., weather lookups, specialized API integrations, platform-specific operations, security reviews. "+
+				"Use short keyword regex for description/tag, not full sentences. "+
+				"If results are returned, pick the best match and call skillhub_load with its id."),
+		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID (e.g., github.com/user/repo)")),
+		mcp.WithString("description", mcp.Description("Short regex for skill description. Use 1-3 keywords joined by | (e.g., 'weather|forecast', 'security|review', 'image|process'), NOT full sentences.")),
+		mcp.WithString("tag", mcp.Description("Regex for tag. Use short keyword (e.g., 'weather', 'utility', 'security')")),
+		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)
 
 	s.AddTool(searchTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -54,10 +57,11 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 
 	loadTool := mcp.NewTool("skillhub_load",
 		mcp.WithDescription(
-			"加载一个技能的完整指令正文。先通过 skillhub_search 找到匹配的技能，然后用其 id 调用此工具。"+
-				"返回的 body 字段是技能的核心指令——你必须严格遵循其中的步骤和方法完成任务。同时返回 sub_skills（子技能列表）和 deps（依赖的其他技能和工具）。"),
-		mcp.WithString("id", mcp.Description("从搜索结果中拿到的完整技能 ID（如 github.com/user/repo）"), mcp.Required()),
-		mcp.WithString("version", mcp.Description("指定版本（可选，不传则用本地已安装的最新版）")),
+			"Load the full instructions for a skill found via skillhub_search. "+
+				"The returned 'body' field contains the step-by-step instructions you must follow to complete the user's task. "+
+				"Also returns 'sub_skills' (nested sub-skills) and 'deps' (required tools and dependent skills)."),
+		mcp.WithString("id", mcp.Description("The skill id from search results"), mcp.Required()),
+		mcp.WithString("version", mcp.Description("Specific version (optional; defaults to latest installed)")),
 	)
 
 	s.AddTool(loadTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
