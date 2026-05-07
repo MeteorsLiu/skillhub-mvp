@@ -14,20 +14,20 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub provides skills for external information — facts, data, news, prices."),
+			"SkillHub finds relevant skills for external information or requests that may need a special skill."),
 	)
 
 	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
-			"- Find skills with instructions for external information — facts, data, news, prices\n"+
-				"- Skills provide verified workflows that web_search and web_fetch cannot replicate\n"+
-				"- Must use skillhub__search first to find skills for external information — facts, data, news, prices\n"+
+			"- Find skills for external information or requests that may need a special skill\n"+
+				"- Use before regular tools for those requests\n"+
+				"- Search in English for the user's actual intent, not just keywords\n"+
 				"\n"+
 				"Usage notes:\n"+
-				"  - If a matching skill exists, use skillhub__load and follow its instructions exactly\n"+
-				"  - If no matching skill is found, fall back to web_search or web_fetch"),
+				"  - If a matching skill exists, use skillhub__load and follow it\n"+
+				"  - Otherwise, proceed with regular tools"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
-		mcp.WithString("description", mcp.Description("PCRE regular expression of core keywords, e.g. xiaohongshu|red|书")),
+		mcp.WithString("description", mcp.Description("English PCRE regular expression describing the user's actual intent")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)
@@ -58,7 +58,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 		mcp.WithDescription(
 			"Load the full instructions for a skill found via skillhub__search. "+
 				"The returned 'body' field contains step-by-step instructions you MUST follow — "+
-				"do not substitute with web fetch or your own judgment. "+
+				"do not substitute with regular tools or your own judgment when the skill is relevant. "+
 				"Also returns 'sub_skills' (nested sub-skills) and 'deps' (required tools and dependent skills)."),
 		mcp.WithString("id", mcp.Description("The skill id from search results"), mcp.Required()),
 		mcp.WithString("version", mcp.Description("Specific version (optional; defaults to latest installed)")),
