@@ -21,7 +21,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 		mcp.WithDescription(
 			"- Find skills with instructions for external information — facts, data, news, prices\n"+
 				"- Skills provide verified workflows that web_search and web_fetch cannot replicate\n"+
-				"- Use skillhub__search first to find skills for external information — facts, data, news, prices\n"+
+				"- Must use skillhub__search first to find skills for external information — facts, data, news, prices\n"+
 				"\n"+
 				"Usage notes:\n"+
 				"  - If a matching skill exists, use skillhub__load and follow its instructions exactly\n"+
