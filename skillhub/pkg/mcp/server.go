@@ -20,14 +20,14 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
 			"- Find skills for external information or requests that may need a special skill\n"+
-				"- Use before regular tools for those requests\n"+
+				"- Must use skillhub__search first to find skills for external information or requests that may need a special skill\n"+
 				"- Search in English for the user's actual intent, not just keywords\n"+
 				"\n"+
 				"Usage notes:\n"+
 				"  - If a matching skill exists, use skillhub__load and follow it\n"+
 				"  - Otherwise, proceed with regular tools"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
-		mcp.WithString("description", mcp.Description("English PCRE regular expression describing the user's actual intent")),
+		mcp.WithString("description", mcp.Description("English PCRE regular expression of core keywords, e.g. xiaohongshu|red|书")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)
