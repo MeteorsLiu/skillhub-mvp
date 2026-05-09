@@ -14,20 +14,25 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub finds relevant skills for external information or requests that may need a special skill."),
+			"SkillHub provides skills that change how a request is performed."),
 	)
 
 	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
-			"- Find skills for external information or requests that may need a special skill\n"+
-				"- Must use skillhub__search first to find skills for external information or requests that may need a special skill\n"+
-				"- Search in English for the user's actual intent, not just keywords\n"+
+			"SkillHub provides skills that change how a request is performed.\n"+
+				"\n"+
+				"For each non-trivial request, check whether the requested information, action, output, or behavior may depend on an existing skill.\n"+
+				"\n"+
+				"CRITICAL: If it may depend on a skill, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.\n"+
+				"\n"+
+				"Search in English for the user's actual intent, not just keywords.\n"+
 				"\n"+
 				"Usage notes:\n"+
-				"  - If a matching skill exists, use skillhub__load and follow it\n"+
-				"  - Otherwise, proceed with regular tools"),
+				"  - If a matching skill is relevant, use skillhub__load and follow it\n"+
+				"  - If no relevant skill exists, proceed normally\n"+
+				"  - Skip only direct answers, pure conversation, ordinary explanations, generic research, generic coding, and requests that need clarification first"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
-		mcp.WithString("description", mcp.Description("English PCRE regular expression of core keywords, e.g. xiaohongshu|red|书")),
+		mcp.WithString("description", mcp.Description("English search query for the user's actual intent")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
 	)
