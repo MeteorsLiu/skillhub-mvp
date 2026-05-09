@@ -14,23 +14,23 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub provides skills that change how a request is performed."),
+			"SkillHub provides skills that can change how a request should be performed."),
 	)
 
 	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
-			"SkillHub provides skills that change how a request is performed.\n"+
+			"SkillHub provides skills that can change how a request should be performed.\n"+
 				"\n"+
-				"For each non-trivial request, check whether the requested information, action, output, or behavior may depend on an existing skill.\n"+
+				"For each non-trivial request, check whether the user asks for a specific way to perform the task, or whether an existing skill could improve the result, reduce mistakes, or provide needed capability.\n"+
 				"\n"+
-				"CRITICAL: If it may depend on a skill, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.\n"+
+				"CRITICAL: If the request asks for a specific way to perform the task, or if a skill could help, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.\n"+
 				"\n"+
 				"Search in English for the user's actual intent, not just keywords.\n"+
 				"\n"+
 				"Usage notes:\n"+
 				"  - If a matching skill is relevant, use skillhub__load and follow it\n"+
 				"  - If no relevant skill exists, proceed normally\n"+
-				"  - Skip only direct answers, pure conversation, ordinary explanations, generic research, generic coding, and requests that need clarification first"),
+				"  - Skip only direct answers, pure conversation, or requests that need clarification first"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
 		mcp.WithString("description", mcp.Description("English search query for the user's actual intent")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
