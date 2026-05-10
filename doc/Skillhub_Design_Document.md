@@ -178,6 +178,7 @@ type SearchRequest struct {
 	Description string `json:"description,omitempty"`
 	Tag         string `json:"tag,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
 }
 
 type LoadRequest struct {
@@ -191,6 +192,7 @@ type SkillSummary struct {
 	Description string   `json:"description"`
 	Version     string   `json:"version,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	Offset      *int     `json:"offset,omitempty"`
 }
 
 type SkillDeps struct {
@@ -219,6 +221,8 @@ type SkillHubTools interface {
 - 三个查询字段至少一个非空
 - `description` / `tag` 按正则匹配
 - `id` 按 root skill 路径精确或前缀匹配
+- `limit` 默认 100，最大 100
+- `offset` 默认 0，用于分页；下一页使用上一页最后一条结果的 `offset + 1`
 - 只返回 root skill 摘要
 
 ### 4.2 `skillhub_load`

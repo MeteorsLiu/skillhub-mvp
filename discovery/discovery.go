@@ -16,6 +16,7 @@ type SkillSummary struct {
 	Description string   `json:"description"`
 	Version     string   `json:"version"`
 	Tags        []string `json:"tags"`
+	Offset      *int     `json:"offset,omitempty"`
 }
 
 type SearchRequest struct {
@@ -23,6 +24,7 @@ type SearchRequest struct {
 	Description string `json:"description,omitempty"`
 	Tag         string `json:"tag,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
 }
 
 type RegisterRequest struct {
@@ -91,30 +93,45 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 
 	limit := req.Limit
 	if limit <= 0 {
-		limit = 20
+		limit = 100
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
 	}
 	dbLimit := limit
 	if len(searchTokens(req.Description)) > 1 && dbLimit < 50 {
 		dbLimit = 50
 	}
+	dbLimit += offset
 
 	var models []skillModel
-	if err := q.Order("created_at DESC").Limit(dbLimit).Find(&models).Error; err != nil {
+	if err := q.Order("created_at DESC, id ASC").Limit(dbLimit).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	rankModels(models, searchTokens(req.Description))
-	if len(models) > limit {
-		models = models[:limit]
+	if offset >= len(models) {
+		return []SkillSummary{}, nil
 	}
+	end := offset + limit
+	if end > len(models) {
+		end = len(models)
+	}
+	models = models[offset:end]
 
 	results := make([]SkillSummary, len(models))
 	for i, m := range models {
+		resultOffset := offset + i
 		results[i] = SkillSummary{
 			ID:          m.ID,
 			Name:        m.Name,
 			Description: m.Description,
 			Version:     m.Version,
 			Tags:        parseTags(m.Tags),
+			Offset:      &resultOffset,
 		}
 	}
 	return results, nil
@@ -153,7 +170,10 @@ func rankModels(models []skillModel, tokens []string) {
 		if left != right {
 			return left > right
 		}
-		return models[i].CreatedAt.After(models[j].CreatedAt)
+		if !models[i].CreatedAt.Equal(models[j].CreatedAt) {
+			return models[i].CreatedAt.After(models[j].CreatedAt)
+		}
+		return models[i].ID < models[j].ID
 	})
 }
 

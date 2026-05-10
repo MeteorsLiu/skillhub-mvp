@@ -47,7 +47,7 @@ func TestUpsert_AffectsRow(t *testing.T) {
 		t.Fatalf("Upsert failed: %v", err)
 	}
 
-	results, err := c.Search("Publish", "", 10)
+	results, err := c.Search("Publish", "", 10, 0)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestSearch_RegexMatch(t *testing.T) {
 		ID: "b", Name: "Quux", Description: "other stuff", Version: "v1.0.0",
 	}, "local")
 
-	results, err := c.Search("bar.*baz", "", 10)
+	results, err := c.Search("bar.*baz", "", 10, 0)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestSearch_TagLikeMatch(t *testing.T) {
 		Tags: []string{"social", "xiaohongshu"},
 	}, "local")
 
-	results, err := c.Search("", "xiaohongshu", 10)
+	results, err := c.Search("", "xiaohongshu", 10, 0)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -117,6 +117,38 @@ func TestSearch_TagLikeMatch(t *testing.T) {
 	}
 	if results[0].ID != "a" {
 		t.Errorf("expected id 'a', got %q", results[0].ID)
+	}
+}
+
+func TestSearch_OffsetPagination(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	for _, id := range []string{"a", "b", "c"} {
+		c.Upsert(types.SkillSummary{
+			ID: id, Name: "Skill " + id, Description: "common", Version: "v1.0.0",
+		}, "local")
+	}
+
+	results, err := c.Search("common", "", 1, 1)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "b" {
+		t.Errorf("expected id 'b', got %q", results[0].ID)
+	}
+	if results[0].Offset == nil || *results[0].Offset != 1 {
+		t.Fatalf("expected offset 1, got %+v", results[0].Offset)
 	}
 }
 
@@ -131,7 +163,7 @@ func TestSearch_EmptyCache(t *testing.T) {
 	}
 	defer c.Close()
 
-	results, err := c.Search("nonexistent", "", 10)
+	results, err := c.Search("nonexistent", "", 10, 0)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -191,7 +223,7 @@ tags:
 	}
 	defer c.Close()
 
-	results, err := c.Search("Publish", "", 10)
+	results, err := c.Search("Publish", "", 10, 0)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -222,7 +254,7 @@ func TestUpsert_Update(t *testing.T) {
 		ID: "test", Name: "New", Version: "v2.0.0",
 	}, "remote")
 
-	results, _ := c.Search("New", "", 10)
+	results, _ := c.Search("New", "", 10, 0)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}

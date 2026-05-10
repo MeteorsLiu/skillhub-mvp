@@ -10,6 +10,7 @@ type SearchRequest struct {
 	Description string `json:"description"`
 	Tag         string `json:"tag"`
 	Limit       int    `json:"limit"`
+	Offset      int    `json:"offset"`
 }
 
 func (r SearchRequest) Validate() error {
@@ -37,6 +38,7 @@ type SkillSummary struct {
 	Description string   `json:"description,omitempty"`
 	Version     string   `json:"version,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	Offset      *int     `json:"offset,omitempty"`
 }
 
 type SkillDeps struct {
@@ -45,12 +47,12 @@ type SkillDeps struct {
 }
 
 type Skill struct {
-	ID        string        `json:"id"`
-	Name      string        `json:"name"`
-	Version   string        `json:"version"`
-	Body      string        `json:"body"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Version   string         `json:"version"`
+	Body      string         `json:"body"`
 	SubSkills []SkillSummary `json:"sub_skills,omitempty"`
-	Deps      SkillDeps     `json:"deps"`
+	Deps      SkillDeps      `json:"deps"`
 }
 
 type SkillHubTools interface {
@@ -71,4 +73,3 @@ func ParseDependency(s string) (id, version string, err error) {
 	}
 	return parts[0], parts[1], nil
 }
-

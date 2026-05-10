@@ -30,11 +30,13 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 				"Usage notes:\n"+
 				"  - If a relevant skill is found, call skillhub__load and follow it\n"+
 				"  - If no relevant skill is found, continue normally\n"+
+				"  - Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1\n"+
 				"  - Skip only requests that can be fully handled directly without a capability gap"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
 		mcp.WithString("description", mcp.Description("English search query for the user's actual intent")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
-		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+		mcp.WithNumber("limit", mcp.Description("Max results (default 100, capped at 100)")),
+		mcp.WithNumber("offset", mcp.Description("0-based pagination offset. For the next page, use the last returned offset plus 1")),
 	)
 
 	s.AddTool(searchTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -42,12 +44,14 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 		description := mcp.ParseString(req, "description", "")
 		tag := mcp.ParseString(req, "tag", "")
 		limit := mcp.ParseInt(req, "limit", 0)
+		offset := mcp.ParseInt(req, "offset", 0)
 
 		searchReq := types.SearchRequest{
 			ID:          id,
 			Description: description,
 			Tag:         tag,
 			Limit:       limit,
+			Offset:      offset,
 		}
 
 		results, err := toolImpl.Search(searchReq)

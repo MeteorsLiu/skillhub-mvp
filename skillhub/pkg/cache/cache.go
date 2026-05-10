@@ -52,9 +52,15 @@ func (c *Cache) Close() error {
 	return c.db.Close()
 }
 
-func (c *Cache) Search(description, tag string, limit int) ([]types.SkillSummary, error) {
+func (c *Cache) Search(description, tag string, limit, offset int) ([]types.SkillSummary, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = 100
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	var descRe *regexp.Regexp
@@ -130,8 +136,17 @@ func (c *Cache) Search(description, tag string, limit int) ([]types.SkillSummary
 		result = []types.SkillSummary{}
 	}
 	rankSummaries(result, searchTokens(description))
-	if len(result) > limit {
-		result = result[:limit]
+	if offset >= len(result) {
+		return []types.SkillSummary{}, nil
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	result = result[offset:end]
+	for i := range result {
+		resultOffset := offset + i
+		result[i].Offset = &resultOffset
 	}
 	return result, nil
 }

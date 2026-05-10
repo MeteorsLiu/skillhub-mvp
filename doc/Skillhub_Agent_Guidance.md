@@ -15,6 +15,8 @@ CRITICAL: If yes, MUST call skillhub__search FIRST before web_search, web_fetch,
 
 Search in English for the user's actual intent, not just keywords.
 
+Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1.
+
 If a relevant skill is found, call skillhub__load and follow it.
 If no relevant skill is found, continue normally.
 

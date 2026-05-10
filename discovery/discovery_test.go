@@ -302,7 +302,7 @@ func TestSearchDefaultLimit(t *testing.T) {
 	ctx := context.Background()
 	freshTable(t, d, db)
 
-	for i := 0; i < 25; i++ {
+	for i := 0; i < 105; i++ {
 		id := fmt.Sprintf("skill-%d", i)
 		if err := d.RegisterSkill(ctx, discovery.SkillSummary{ID: id, Name: id}); err != nil {
 			t.Fatal(err)
@@ -316,8 +316,38 @@ func TestSearchDefaultLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 20 {
-		t.Fatalf("expected 20 results (default limit), got %d", len(results))
+	if len(results) != 100 {
+		t.Fatalf("expected 100 results (default limit), got %d", len(results))
+	}
+}
+
+func TestSearchOffsetPagination(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	for _, id := range []string{"skill-a", "skill-b", "skill-c"} {
+		if err := d.RegisterSkill(ctx, discovery.SkillSummary{ID: id, Name: id, Description: "common"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Approve(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := d.Search(ctx, discovery.SearchRequest{Description: "common", Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "skill-b" {
+		t.Fatalf("expected skill-b, got %q", results[0].ID)
+	}
+	if results[0].Offset == nil || *results[0].Offset != 1 {
+		t.Fatalf("expected offset 1, got %+v", results[0].Offset)
 	}
 }
 

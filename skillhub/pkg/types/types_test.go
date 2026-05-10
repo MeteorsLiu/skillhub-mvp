@@ -93,15 +93,14 @@ func TestParseDependency_EmptyID(t *testing.T) {
 	}
 }
 
-
 func TestSearchRequest_JSONTags(t *testing.T) {
-	req := types.SearchRequest{ID: "s1", Description: "desc", Tag: "go", Limit: 5}
+	req := types.SearchRequest{ID: "s1", Description: "desc", Tag: "go", Limit: 5, Offset: 10}
 	b, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(b)
-	want := `{"id":"s1","description":"desc","tag":"go","limit":5}`
+	want := `{"id":"s1","description":"desc","tag":"go","limit":5,"offset":10}`
 	if got != want {
 		t.Errorf("expected %s, got %s", want, got)
 	}
@@ -134,19 +133,21 @@ func TestSkillSummary_JSONTagsOmitempty(t *testing.T) {
 }
 
 func TestSkillSummary_JSONTagsAllFields(t *testing.T) {
+	offset := 3
 	s := types.SkillSummary{
 		ID:          "s1",
 		Name:        "test",
 		Description: "a test skill",
 		Version:     "1.0",
 		Tags:        []string{"go", "test"},
+		Offset:      &offset,
 	}
 	b, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(b)
-	want := `{"id":"s1","name":"test","description":"a test skill","version":"1.0","tags":["go","test"]}`
+	want := `{"id":"s1","name":"test","description":"a test skill","version":"1.0","tags":["go","test"],"offset":3}`
 	if got != want {
 		t.Errorf("expected %s, got %s", want, got)
 	}

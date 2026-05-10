@@ -14,6 +14,7 @@ type SkillSummary struct {
 	Description string   `json:"description"`
 	Version     string   `json:"version"`
 	Tags        []string `json:"tags"`
+	Offset      *int     `json:"offset,omitempty"`
 }
 
 type SearchRequest struct {
@@ -21,6 +22,7 @@ type SearchRequest struct {
 	Description string `json:"description,omitempty"`
 	Tag         string `json:"tag,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
 }
 
 type Client struct {

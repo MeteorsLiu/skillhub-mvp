@@ -98,10 +98,17 @@ func TestSearch(t *testing.T) {
 			if req.ID != "test" {
 				t.Errorf("expected id 'test', got %q", req.ID)
 			}
-			return []types.SkillSummary{{ID: "test", Name: "Test", Version: "v1.0.0"}}, nil
+			if req.Limit != 5 {
+				t.Errorf("expected limit 5, got %d", req.Limit)
+			}
+			if req.Offset != 10 {
+				t.Errorf("expected offset 10, got %d", req.Offset)
+			}
+			offset := 10
+			return []types.SkillSummary{{ID: "test", Name: "Test", Version: "v1.0.0", Offset: &offset}}, nil
 		},
 	})
-	result := callTool(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"skillhub_search","arguments":{"id":"test"}}}`)
+	result := callTool(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"skillhub_search","arguments":{"id":"test","limit":5,"offset":10}}}`)
 	if result.IsError {
 		t.Fatal("tool returned error")
 	}
@@ -118,6 +125,9 @@ func TestSearch(t *testing.T) {
 	}
 	if len(skills) != 1 || skills[0].ID != "test" {
 		t.Errorf("unexpected skills: %+v", skills)
+	}
+	if skills[0].Offset == nil || *skills[0].Offset != 10 {
+		t.Fatalf("expected offset 10, got %+v", skills[0].Offset)
 	}
 }
 

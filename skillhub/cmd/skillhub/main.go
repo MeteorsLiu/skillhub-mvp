@@ -162,7 +162,7 @@ func (c *mcpCore) splitSubSkill(id string) (rootID, subPath string) {
 
 func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) {
 	if c.cache != nil {
-		results, err := c.cache.Search(req.Description, req.Tag, req.Limit)
+		results, err := c.cache.Search(req.Description, req.Tag, req.Limit, req.Offset)
 		if err == nil && len(results) > 0 {
 			return results, nil
 		}
@@ -173,6 +173,7 @@ func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) 
 		Description: req.Description,
 		Tag:         req.Tag,
 		Limit:       req.Limit,
+		Offset:      req.Offset,
 	}
 	remoteResults, err := c.client.Search(context.Background(), discReq)
 	if err != nil {
@@ -201,6 +202,7 @@ func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) 
 			Description: r.Description,
 			Version:     r.Version,
 			Tags:        r.Tags,
+			Offset:      r.Offset,
 		}
 	}
 	return out, nil
@@ -266,7 +268,7 @@ func (c *mcpCore) Load(req types.LoadRequest) (*types.Skill, error) {
 		}, "local")
 
 		for i, dep := range skill.Deps.Skills {
-			depResults, _ := c.cache.Search(dep.ID, "", 1)
+			depResults, _ := c.cache.Search(dep.ID, "", 1, 0)
 			for _, r := range depResults {
 				if r.ID == dep.ID {
 					skill.Deps.Skills[i].Name = r.Name
