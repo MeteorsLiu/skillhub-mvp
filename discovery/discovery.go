@@ -270,8 +270,8 @@ func joinTags(tags []string) string {
 	return "{" + strings.Join(escaped, ",") + "}"
 }
 
-func tagSearchText(skill SkillSummary) (tagsText, nameText string) {
-	return strings.Join(skill.Tags, " "), skill.Name
+func tagSearchText(skill SkillSummary) (tagsText, nameText, descriptionText string) {
+	return strings.Join(skill.Tags, " "), skill.Name, skill.Description
 }
 
 func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error {
@@ -313,14 +313,15 @@ func (d *Discovery) BackfillSkillMetadata(ctx context.Context, skill SkillSummar
 }
 
 func (d *Discovery) updateTagSearchVector(ctx context.Context, id string, skill SkillSummary) error {
-	tagsText, nameText := tagSearchText(skill)
+	tagsText, nameText, descriptionText := tagSearchText(skill)
 	return d.db.WithContext(ctx).Exec(`
 		UPDATE skill_models
 		SET tag_search_vector =
 			setweight(to_tsvector('english', coalesce(?, '')), 'A') ||
-			setweight(to_tsvector('english', coalesce(?, '')), 'B')
+			setweight(to_tsvector('english', coalesce(?, '')), 'B') ||
+			setweight(to_tsvector('english', coalesce(?, '')), 'C')
 		WHERE id = ?
-	`, tagsText, nameText, id).Error
+	`, tagsText, nameText, descriptionText, id).Error
 }
 
 func (d *Discovery) Approve(ctx context.Context, id string) error {
