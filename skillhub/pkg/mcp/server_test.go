@@ -114,9 +114,9 @@ func TestSearchToolDescribesTagAndDescriptionSemantics(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"Use tag for the broad skill area, and description for the specific user intent",
+		"Search skillhub__search in English: tag is the broad skill area; description is the specific user intent",
 		"English broad skill area hint. Not regex",
-		"Regex pattern for the specific user intent",
+		"English regex pattern for the specific user intent",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("tool metadata missing %q in %s", want, text)

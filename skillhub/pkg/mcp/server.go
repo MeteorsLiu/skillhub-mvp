@@ -25,7 +25,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 				"\n"+
 				"CRITICAL: If yes, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.\n"+
 				"\n"+
-				"Search in English. Use tag for the broad skill area, and description for the specific user intent.\n"+
+				"Search skillhub__search in English: tag is the broad skill area; description is the specific user intent.\n"+
 				"\n"+
 				"Usage notes:\n"+
 				"  - If a relevant skill is found, call skillhub__load and follow it\n"+
@@ -33,7 +33,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 				"  - Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1\n"+
 				"  - Skip only requests that can be fully handled directly without a capability gap"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
-		mcp.WithString("description", mcp.Description("Regex pattern for the specific user intent, matched against skill name and description")),
+		mcp.WithString("description", mcp.Description("English regex pattern for the specific user intent, matched against skill name and description")),
 		mcp.WithString("tag", mcp.Description("English broad skill area hint. Not regex")),
 		mcp.WithNumber("limit", mcp.Description("Max results (default 100, capped at 100)")),
 		mcp.WithNumber("offset", mcp.Description("0-based pagination offset. For the next page, use the last returned offset plus 1")),
