@@ -120,6 +120,69 @@ func TestSearch_TagLikeMatch(t *testing.T) {
 	}
 }
 
+func TestSearch_TagSemanticMatch(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	c.Upsert(types.SkillSummary{ID: "finance", Name: "Stock Market Lookup", Tags: []string{"finance", "market"}}, "local")
+	c.Upsert(types.SkillSummary{ID: "weather", Name: "Weather Lookup", Tags: []string{"weather"}}, "local")
+
+	results, err := c.Search("", "finance market", 10, 0)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != "finance" {
+		t.Fatalf("expected finance result, got %+v", results)
+	}
+}
+
+func TestSearch_TagIsNotRegex(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	c.Upsert(types.SkillSummary{ID: "finance", Name: "Stock Lookup", Tags: []string{"finance"}}, "local")
+	c.Upsert(types.SkillSummary{ID: "weather", Name: "Weather Lookup", Tags: []string{"weather"}}, "local")
+
+	results, err := c.Search("", ".*", 10, 0)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected regex tag not to enumerate rows, got %+v", results)
+	}
+}
+
+func TestSearch_AllMatchDescriptionRequiresTag(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	skillsRoot := filepath.Join(dir, "skills")
+
+	c, err := cache.Open(dbPath, skillsRoot)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer c.Close()
+
+	_, err = c.Search(".*", "", 10, 0)
+	if err == nil {
+		t.Fatal("expected all-match description without tag to fail")
+	}
+}
+
 func TestSearch_OffsetPagination(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")

@@ -53,6 +53,11 @@ func (c *Cache) Close() error {
 }
 
 func (c *Cache) Search(description, tag string, limit, offset int) ([]types.SkillSummary, error) {
+	description = strings.TrimSpace(description)
+	tag = strings.TrimSpace(tag)
+	if err := validateSearch(description, tag); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -81,9 +86,7 @@ func (c *Cache) Search(description, tag string, limit, offset int) ([]types.Skil
 	}
 
 	var likePattern string
-	if tag != "" {
-		likePattern = tag
-	} else if descRe == nil {
+	if tag == "" && descRe == nil {
 		likePattern = description
 	}
 
@@ -135,7 +138,26 @@ func (c *Cache) Search(description, tag string, limit, offset int) ([]types.Skil
 	if result == nil {
 		result = []types.SkillSummary{}
 	}
-	rankSummaries(result, searchTokens(description))
+	if tag != "" {
+		tokens := tagTokens(tag)
+		var filtered []types.SkillSummary
+		for _, s := range result {
+			if tagScore(s, tokens) > 0 {
+				filtered = append(filtered, s)
+			}
+		}
+		result = filtered
+		sort.SliceStable(result, func(i, j int) bool {
+			left := tagScore(result[i], tokens)
+			right := tagScore(result[j], tokens)
+			if left != right {
+				return left > right
+			}
+			return result[i].ID < result[j].ID
+		})
+	} else {
+		rankSummaries(result, searchTokens(description))
+	}
 	if offset >= len(result) {
 		return []types.SkillSummary{}, nil
 	}
@@ -149,6 +171,35 @@ func (c *Cache) Search(description, tag string, limit, offset int) ([]types.Skil
 		result[i].Offset = &resultOffset
 	}
 	return result, nil
+}
+
+func validateSearch(description, tag string) error {
+	if tag == "" && description == ".*" {
+		return fmt.Errorf("description all-match regex requires tag")
+	}
+	return nil
+}
+
+func tagTokens(tag string) []string {
+	return searchTokens(strings.ToLower(tag))
+}
+
+func tagScore(summary types.SkillSummary, tokens []string) int {
+	if len(tokens) == 0 {
+		return 0
+	}
+	tagText := strings.ToLower(strings.Join(summary.Tags, " "))
+	nameText := strings.ToLower(summary.Name)
+	score := 0
+	for _, token := range tokens {
+		if strings.Contains(tagText, token) {
+			score += 3
+		}
+		if strings.Contains(nameText, token) {
+			score++
+		}
+	}
+	return score
 }
 
 func searchTokens(description string) []string {
