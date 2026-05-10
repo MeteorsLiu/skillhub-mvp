@@ -1,3 +1,10 @@
+# SkillHub Agent Guidance
+
+This is the canonical agent-facing guidance for hosts that want agents to discover and load SkillHub skills on demand.
+
+It is runtime guidance for agent behavior, not repository development guidance. Do not place it in a project-level `AGENTS.md` unless the host intentionally uses `AGENTS.md` as the runtime instruction injection mechanism.
+
+```md
 # SkillHub (CRITICAL)
 
 SkillHub fills capability gaps.
@@ -12,3 +19,4 @@ If a relevant skill is found, call skillhub__load and follow it.
 If no relevant skill is found, continue normally.
 
 Skip only requests that can be fully handled directly without a capability gap.
+```
