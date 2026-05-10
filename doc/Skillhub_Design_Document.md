@@ -219,7 +219,9 @@ type SkillHubTools interface {
 
 - `id`、`description`、`tag` 可为空
 - 三个查询字段至少一个非空
-- `description` / `tag` 按正则匹配
+- `description` 按正则匹配 skill name 和 description
+- `tag` 是英文 broad skill area hint，不是正则
+- `tag` 用 Postgres FTS / 本地 token ranking 做语义化领域召回
 - `id` 按 root skill 路径精确或前缀匹配
 - `limit` 默认 100，最大 100
 - `offset` 默认 0，用于分页；下一页使用上一页最后一条结果的 `offset + 1`

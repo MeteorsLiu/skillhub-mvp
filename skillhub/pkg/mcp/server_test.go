@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -89,6 +90,37 @@ func TestToolsList(t *testing.T) {
 	}
 	if !foundLoad {
 		t.Error("missing skillhub_load")
+	}
+}
+
+func TestSearchToolDescribesTagAndDescriptionSemantics(t *testing.T) {
+	srv := skillhubmcp.NewServer(&mockTools{})
+	tools := listTools(t, srv)
+
+	var search *mcp.Tool
+	for i := range tools {
+		if tools[i].Name == "skillhub_search" {
+			search = &tools[i]
+			break
+		}
+	}
+	if search == nil {
+		t.Fatal("missing skillhub_search")
+	}
+
+	data, err := json.Marshal(search)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"Use tag for the broad skill area, and description for the specific user intent",
+		"English broad skill area hint. Not regex",
+		"Regex pattern for the specific user intent",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("tool metadata missing %q in %s", want, text)
+		}
 	}
 }
 

@@ -13,7 +13,7 @@ For every user request, check whether an existing skill could improve the result
 
 CRITICAL: If yes, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.
 
-Search in English for the user's actual intent, not just keywords.
+Search in English. Use tag for the broad skill area, and description for the specific user intent.
 
 Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1.
 
