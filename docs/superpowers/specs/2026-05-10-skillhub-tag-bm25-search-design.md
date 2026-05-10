@@ -135,27 +135,27 @@ First version:
 
 SQLite FTS5 can be considered later if local cache search becomes slow or low quality. It is not required for the first implementation.
 
-## Data Reset And Re-Registration
+## Existing Data Backfill
 
 Current approved skills were registered without useful tags, so tag semantic search will not work correctly on existing rows.
 
-Before deploying this behavior, clear the discovery database and re-register skills through the normal registration path.
+Do not require clearing the discovery database or re-running the full registration flow. The first implementation should provide a database backfill path that updates existing approved rows in place.
+
+Backfill source:
+
+- Use each row's existing source metadata or skill ID to locate the installed or fetchable `SKILL.md`.
+- Reuse the scanner/parser path that already extracts root skill metadata.
+- Update `name`, `description`, `tags`, `version`, and the tag search vector for existing rows.
+- Preserve approval state unless the scanner cannot resolve the skill metadata.
+- If metadata cannot be resolved, report the row as a backfill failure and leave the existing row unchanged.
 
 Operational requirement:
 
-```sql
-DELETE FROM skill_models;
+```text
+Run a one-time backfill command or admin job after deploying the schema/search change.
 ```
 
-Use the actual table name from the current database schema if it differs.
-
-After clearing, re-register skills from known sources so scanner metadata repopulates:
-
-- `id`
-- `name`
-- `description`
-- `tags`
-- `version`
+The backfill should be idempotent. Running it more than once should produce the same approved skill metadata and rebuilt tag search vectors.
 
 Registration should not silently invent tags. Skill packages should provide meaningful root skill tags in `SKILL.md`.
 
@@ -236,9 +236,8 @@ Docs:
 1. Implement and test search semantics behind the existing `skillhub_search` API.
 2. Update MCP and AGENTS guidance.
 3. Build and deploy discovery and SkillHub MCP server.
-4. Clear discovery database rows that were registered without tags.
-5. Re-register skills through `/register` or the batch registration script.
-6. Run evaluation against known boundary cases:
+4. Run the one-time metadata backfill against existing discovery rows.
+5. Run evaluation against known boundary cases:
    - weather/current data
    - stock/market data
    - persona/style requests
@@ -251,4 +250,3 @@ Docs:
 - Whether to reject broad regex patterns beyond the common `.*` in the first implementation.
 - Whether `tag` ranking should include name only, or eventually include a curated `area_description`.
 - Whether local cache should later move to SQLite FTS5 for true local BM25-style ranking.
-
