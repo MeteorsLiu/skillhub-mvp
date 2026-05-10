@@ -152,7 +152,7 @@ Backfill source:
 Operational requirement:
 
 ```text
-Run a one-time backfill command or admin job after deploying the schema/search change.
+Run a one-time local backfill command or direct database maintenance step after deploying the schema/search change. Do not expose this as a public HTTP API.
 ```
 
 The backfill should be idempotent. Running it more than once should produce the same approved skill metadata and rebuilt tag search vectors.

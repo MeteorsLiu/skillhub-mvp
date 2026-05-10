@@ -507,3 +507,39 @@ func TestRegisterUpdatesExisting(t *testing.T) {
 		t.Errorf("expected tags ['new'], got %v", results[0].Tags)
 	}
 }
+
+func TestBackfillSkillMetadataPreservesApproval(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	if err := d.RegisterSkill(ctx, discovery.SkillSummary{ID: "s1", Name: "Old", Description: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Approve(ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := d.BackfillSkillMetadata(ctx, discovery.SkillSummary{
+		ID:          "s1",
+		Name:        "Stock Lookup",
+		Description: "Lookup stock prices",
+		Version:     "2.0",
+		Tags:        []string{"finance", "market"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "finance", Description: ".*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ID != "s1" {
+		t.Fatalf("expected backfilled approved skill, got %+v", results)
+	}
+	if results[0].Name != "Stock Lookup" || results[0].Version != "2.0" {
+		t.Fatalf("metadata not updated: %+v", results[0])
+	}
+}

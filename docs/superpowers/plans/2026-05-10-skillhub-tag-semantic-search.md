@@ -14,9 +14,7 @@
 
 - Modify `discovery/discovery.go`: schema migration, tag search vector maintenance, search validation, FTS query, ranking, and backfill methods.
 - Modify `discovery/discovery_test.go`: discovery tests for tag semantic search, anti-enumeration validation, ranking, offset, and backfill.
-- Modify `discovery/server.go`: admin HTTP endpoint for metadata backfill if needed.
 - Modify `discovery/worker.go`: extract reusable fetch/update metadata helper from registration worker.
-- Modify `discovery/cmd/discovery/main.go`: wire any new admin route through existing server.
 - Modify `skillhub/pkg/cache/cache.go`: local cache semantic tag search and anti-enumeration validation.
 - Modify `skillhub/pkg/cache/cache_test.go`: local search tests.
 - Modify `skillhub/pkg/mcp/server.go`: tool descriptions for `tag` and `description`.
@@ -828,65 +826,7 @@ func FetchSkillMetadata(id, version string) (SkillSummary, string, error) {
 
 Add `fmt` to imports. Update `HandleRegisterSkill` to call this helper and `defer os.RemoveAll(tmpDir)` after successful fetch.
 
-- [ ] **Step 5: Add admin backfill endpoint**
-
-In `discovery/server.go`, add route:
-
-```go
-case r.Method == "POST" && r.URL.Path == "/v1/admin/backfill":
-	s.handleBackfill(w, r)
-```
-
-Add handler:
-
-```go
-func (s *Server) handleBackfill(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	pending, err := s.disc.ListAll(ctx)
-	if err != nil {
-		writeError(w, err.Error(), 500)
-		return
-	}
-	var updated []string
-	var failed []string
-	for _, item := range pending {
-		skill, tmpDir, err := FetchSkillMetadata(item.ID, item.Version)
-		if tmpDir != "" {
-			os.RemoveAll(tmpDir)
-		}
-		if err != nil {
-			failed = append(failed, item.ID)
-			continue
-		}
-		if err := s.disc.BackfillSkillMetadata(ctx, skill); err != nil {
-			failed = append(failed, item.ID)
-			continue
-		}
-		updated = append(updated, item.ID)
-	}
-	json.NewEncoder(w).Encode(map[string]any{"updated": updated, "failed": failed})
-}
-```
-
-Add `os` import.
-
-In `discovery/discovery.go`, add:
-
-```go
-func (d *Discovery) ListAll(ctx context.Context) ([]RegisterRequest, error) {
-	var models []skillModel
-	if err := d.db.WithContext(ctx).Model(&skillModel{}).Find(&models).Error; err != nil {
-		return nil, err
-	}
-	reqs := make([]RegisterRequest, len(models))
-	for i, m := range models {
-		reqs[i] = RegisterRequest{ID: m.ID, Version: m.Version}
-	}
-	return reqs, nil
-}
-```
-
-- [ ] **Step 6: Run backfill tests**
+- [ ] **Step 5: Run backfill tests**
 
 Run:
 
@@ -897,10 +837,10 @@ go test ./... -run 'TestBackfillSkillMetadataPreservesApproval|TestSearchBySeman
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add discovery/discovery.go discovery/discovery_test.go discovery/worker.go discovery/server.go
+git add discovery/discovery.go discovery/discovery_test.go discovery/worker.go
 git commit -m "Add discovery metadata backfill"
 ```
 

@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -22,6 +23,38 @@ func NewRegisterSkillTask(id, version string) (*asynq.Task, error) {
 	return asynq.NewTask(TypeRegisterSkill, payload), nil
 }
 
+func FetchSkillMetadata(id, version string) (SkillSummary, string, error) {
+	tmpDir, err := os.MkdirTemp("", "discovery-worker-*")
+	if err != nil {
+		return SkillSummary{}, "", err
+	}
+
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.RemoveAll(tmpDir)
+		}
+	}()
+
+	if version == "" {
+		version = "latest"
+	}
+
+	cmd := exec.Command("skillhub", "fetch", id+"@"+version, tmpDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return SkillSummary{}, "", fmt.Errorf("fetch %s failed: %s", id, string(out))
+	}
+
+	var skill SkillSummary
+	if err := json.Unmarshal(out, &skill); err != nil {
+		return SkillSummary{}, "", err
+	}
+
+	cleanup = false
+	return skill, tmpDir, nil
+}
+
 func HandleRegisterSkill(ctx context.Context, t *asynq.Task, disc *Discovery) error {
 	var payload struct {
 		ID      string `json:"id"`
@@ -33,28 +66,10 @@ func HandleRegisterSkill(ctx context.Context, t *asynq.Task, disc *Discovery) er
 
 	log.Printf("worker: processing %s@%s", payload.ID, payload.Version)
 
-	tmpDir, err := os.MkdirTemp("", "discovery-worker-*")
-	if err != nil {
-		return err
-	}
+	skill, tmpDir, err := FetchSkillMetadata(payload.ID, payload.Version)
 	defer os.RemoveAll(tmpDir)
-
-	version := payload.Version
-	if version == "" {
-		version = "latest"
-	}
-
-	cmd := exec.Command("skillhub", "fetch", payload.ID+"@"+version, tmpDir)
-	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("worker: fetch %s failed: %s", payload.ID, string(out))
-		_ = disc.Reject(ctx, payload.ID)
-		return nil
-	}
-
-	var skill SkillSummary
-	if err := json.Unmarshal(out, &skill); err != nil {
-		log.Printf("worker: parse %s: %v", payload.ID, err)
+		log.Printf("worker: fetch %s failed: %v", payload.ID, err)
 		_ = disc.Reject(ctx, payload.ID)
 		return nil
 	}

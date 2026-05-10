@@ -289,6 +289,29 @@ func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error
 	return d.updateTagSearchVector(ctx, skill.ID, skill)
 }
 
+func (d *Discovery) BackfillSkillMetadata(ctx context.Context, skill SkillSummary) error {
+	skill.ID = strings.TrimSpace(skill.ID)
+	if skill.ID == "" {
+		return errors.New("id is required")
+	}
+
+	var existing skillModel
+	if err := d.db.WithContext(ctx).Where("id = ?", skill.ID).First(&existing).Error; err != nil {
+		return err
+	}
+
+	updates := map[string]any{
+		"name":        skill.Name,
+		"description": skill.Description,
+		"version":     skill.Version,
+		"tags":        joinTags(skill.Tags),
+	}
+	if err := d.db.WithContext(ctx).Model(&skillModel{}).Where("id = ?", skill.ID).Updates(updates).Error; err != nil {
+		return err
+	}
+	return d.updateTagSearchVector(ctx, skill.ID, skill)
+}
+
 func (d *Discovery) updateTagSearchVector(ctx context.Context, id string, skill SkillSummary) error {
 	tagsText, nameText := tagSearchText(skill)
 	return d.db.WithContext(ctx).Exec(`
