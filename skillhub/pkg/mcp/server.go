@@ -14,23 +14,23 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub provides skills that can change how a request should be performed."),
+			"SkillHub fills capability gaps."),
 	)
 
-	searchTool := mcp.NewTool("search",
+	searchTool := mcp.NewTool("skillhub_search",
 		mcp.WithDescription(
-			"SkillHub provides skills that can change how a request should be performed.\n"+
+			"SkillHub fills capability gaps.\n"+
 				"\n"+
-				"For each non-trivial request, check whether the user asks for a specific way to perform the task, or whether an existing skill could improve the result, reduce mistakes, or provide needed capability.\n"+
+				"For every user request, check whether an existing skill could improve the result, reduce mistakes, or provide needed capability.\n"+
 				"\n"+
-				"CRITICAL: If the request asks for a specific way to perform the task, or if a skill could help, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.\n"+
+				"CRITICAL: If yes, MUST call skillhub__search FIRST before web_search, web_fetch, browsing, or other regular tools.\n"+
 				"\n"+
 				"Search in English for the user's actual intent, not just keywords.\n"+
 				"\n"+
 				"Usage notes:\n"+
-				"  - If a matching skill is relevant, use skillhub__load and follow it\n"+
-				"  - If no relevant skill exists, proceed normally\n"+
-				"  - Skip only direct answers, pure conversation, or requests that need clarification first"),
+				"  - If a relevant skill is found, call skillhub__load and follow it\n"+
+				"  - If no relevant skill is found, continue normally\n"+
+				"  - Skip only requests that can be fully handled directly without a capability gap"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),
 		mcp.WithString("description", mcp.Description("English search query for the user's actual intent")),
 		mcp.WithString("tag", mcp.Description("Regex match on skill tags")),
@@ -59,7 +59,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 		return mcp.NewToolResultText(string(data)), nil
 	})
 
-	loadTool := mcp.NewTool("load",
+	loadTool := mcp.NewTool("skillhub_load",
 		mcp.WithDescription(
 			"Load the full instructions for a skill found via skillhub__search. "+
 				"The returned 'body' field contains step-by-step instructions you MUST follow — "+

@@ -98,16 +98,48 @@ func Clone(repoURL, version, subDir, targetDir string) error {
 		}
 		return nil
 	}
+
+	return sparseCloneSubdir(repoURL, version, subDir, targetDir)
+}
+
+func sparseCloneSubdir(repoURL, version, subDir, targetDir string) error {
 	tmpDir, err := os.MkdirTemp("", "vcs-clone-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmpDir)
-	args = append(args, tmpDir)
-	cmd := exec.Command("git", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git clone failed: %w\n%s", err, out)
+
+	runGit := func(args ...string) error {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git %s failed: %w\n%s", args[0], err, out)
+		}
+		return nil
 	}
+
+	gitPath := filepath.ToSlash(filepath.Clean(subDir))
+	if err := runGit("init"); err != nil {
+		return err
+	}
+	if err := runGit("remote", "add", "origin", repoURL); err != nil {
+		return err
+	}
+	if err := runGit("sparse-checkout", "init", "--no-cone"); err != nil {
+		return err
+	}
+	if err := runGit("sparse-checkout", "set", gitPath, gitPath+"/**"); err != nil {
+		return err
+	}
+	if err := runGit("fetch", "--depth=1", "--filter=blob:none", "origin", version); err != nil {
+		return err
+	}
+	if err := runGit("checkout", "FETCH_HEAD"); err != nil {
+		return err
+	}
+
 	src := filepath.Join(tmpDir, subDir)
 	return copyDir(src, targetDir)
 }

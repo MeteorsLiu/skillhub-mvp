@@ -2,6 +2,8 @@ package discovery
 
 import (
 	"context"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,13 +41,13 @@ type ReviewResult struct {
 }
 
 type skillModel struct {
-	ID          string    `gorm:"primaryKey"`
-	Name        string    `gorm:"default:''"`
-	Description string    `gorm:"default:''"`
-	Version     string    `gorm:"default:''"`
-	Tags        string    `gorm:"type:text[];default:'{}'"`
-	Status      string    `gorm:"default:'pending'"`
-	Source      string    `gorm:"default:''"`
+	ID          string `gorm:"primaryKey"`
+	Name        string `gorm:"default:''"`
+	Description string `gorm:"default:''"`
+	Version     string `gorm:"default:''"`
+	Tags        string `gorm:"type:text[];default:'{}'"`
+	Status      string `gorm:"default:'pending'"`
+	Source      string `gorm:"default:''"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -80,7 +82,8 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 		q = q.Where("id = ? OR id LIKE ?", req.ID, req.ID+"/%")
 	}
 	if req.Description != "" {
-		q = q.Where("description ~* ?", req.Description)
+		pattern := searchPattern(req.Description)
+		q = q.Where("name ~* ? OR description ~* ?", pattern, pattern)
 	}
 	if req.Tag != "" {
 		q = q.Where("EXISTS (SELECT 1 FROM unnest(tags) t WHERE t ~* ?)", req.Tag)
@@ -90,10 +93,18 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 	if limit <= 0 {
 		limit = 20
 	}
+	dbLimit := limit
+	if len(searchTokens(req.Description)) > 1 && dbLimit < 50 {
+		dbLimit = 50
+	}
 
 	var models []skillModel
-	if err := q.Order("created_at DESC").Limit(limit).Find(&models).Error; err != nil {
+	if err := q.Order("created_at DESC").Limit(dbLimit).Find(&models).Error; err != nil {
 		return nil, err
+	}
+	rankModels(models, searchTokens(req.Description))
+	if len(models) > limit {
+		models = models[:limit]
 	}
 
 	results := make([]SkillSummary, len(models))
@@ -107,6 +118,58 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 		}
 	}
 	return results, nil
+}
+
+func searchPattern(description string) string {
+	parts := searchTokens(description)
+	if len(parts) > 1 {
+		for i, part := range parts {
+			parts[i] = regexp.QuoteMeta(part)
+		}
+		return strings.Join(parts, "|")
+	}
+	return description
+}
+
+func searchTokens(description string) []string {
+	fields := strings.Fields(description)
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		token := strings.Trim(field, " \t\r\n,.;:!?\"'`()[]{}<>")
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+func rankModels(models []skillModel, tokens []string) {
+	if len(tokens) == 0 {
+		return
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		left := modelScore(models[i], tokens)
+		right := modelScore(models[j], tokens)
+		if left != right {
+			return left > right
+		}
+		return models[i].CreatedAt.After(models[j].CreatedAt)
+	})
+}
+
+func modelScore(m skillModel, tokens []string) int {
+	nameID := strings.ToLower(m.Name + " " + m.ID)
+	text := strings.ToLower(nameID + " " + m.Description)
+	score := 0
+	for _, token := range tokens {
+		token = strings.ToLower(token)
+		if strings.Contains(nameID, token) {
+			score += 3
+		} else if strings.Contains(text, token) {
+			score++
+		}
+	}
+	return score
 }
 
 func parseTags(s string) []string {

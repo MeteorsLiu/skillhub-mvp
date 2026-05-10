@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,11 +60,12 @@ func (c *Cache) Search(description, tag string, limit int) ([]types.SkillSummary
 	var descRe *regexp.Regexp
 	if description != "" {
 		pattern := description
-		if !regexp.MustCompile(`[|*+.()\[\]{}^$?]`).MatchString(description) {
-			parts := strings.Fields(description)
-			if len(parts) > 1 {
-				pattern = strings.Join(parts, "|")
+		parts := searchTokens(description)
+		if len(parts) > 1 {
+			for i, part := range parts {
+				parts[i] = regexp.QuoteMeta(part)
 			}
+			pattern = strings.Join(parts, "|")
 		}
 		var err error
 		descRe, err = regexp.Compile(pattern)
@@ -127,10 +129,52 @@ func (c *Cache) Search(description, tag string, limit int) ([]types.SkillSummary
 	if result == nil {
 		result = []types.SkillSummary{}
 	}
+	rankSummaries(result, searchTokens(description))
 	if len(result) > limit {
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+func searchTokens(description string) []string {
+	fields := strings.Fields(description)
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		token := strings.Trim(field, " \t\r\n,.;:!?\"'`()[]{}<>")
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+func rankSummaries(summaries []types.SkillSummary, tokens []string) {
+	if len(tokens) == 0 {
+		return
+	}
+	sort.SliceStable(summaries, func(i, j int) bool {
+		left := summaryScore(summaries[i], tokens)
+		right := summaryScore(summaries[j], tokens)
+		if left != right {
+			return left > right
+		}
+		return summaries[i].ID < summaries[j].ID
+	})
+}
+
+func summaryScore(summary types.SkillSummary, tokens []string) int {
+	nameID := strings.ToLower(summary.Name + " " + summary.ID)
+	text := strings.ToLower(nameID + " " + summary.Description)
+	score := 0
+	for _, token := range tokens {
+		token = strings.ToLower(token)
+		if strings.Contains(nameID, token) {
+			score += 3
+		} else if strings.Contains(text, token) {
+			score++
+		}
+	}
+	return score
 }
 
 func (c *Cache) Upsert(summary types.SkillSummary, source string) error {
