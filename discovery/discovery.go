@@ -2,12 +2,14 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SkillSummary struct {
@@ -43,15 +45,16 @@ type ReviewResult struct {
 }
 
 type skillModel struct {
-	ID          string `gorm:"primaryKey"`
-	Name        string `gorm:"default:''"`
-	Description string `gorm:"default:''"`
-	Version     string `gorm:"default:''"`
-	Tags        string `gorm:"type:text[];default:'{}'"`
-	Status      string `gorm:"default:'pending'"`
-	Source      string `gorm:"default:''"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID              string `gorm:"primaryKey"`
+	Name            string `gorm:"default:''"`
+	Description     string `gorm:"default:''"`
+	Version         string `gorm:"default:''"`
+	Tags            string `gorm:"type:text[];default:'{}'"`
+	TagSearchVector string `gorm:"type:tsvector"`
+	Status          string `gorm:"default:'pending'"`
+	Source          string `gorm:"default:''"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type Discovery struct {
@@ -74,10 +77,27 @@ func (d *Discovery) Init(ctx context.Context) error {
 	if !d.db.Migrator().HasColumn(&skillModel{}, "status") {
 		d.db.WithContext(ctx).Exec(`ALTER TABLE skill_models ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`)
 	}
+	if !d.db.Migrator().HasColumn(&skillModel{}, "tag_search_vector") {
+		if err := d.db.WithContext(ctx).Exec(`ALTER TABLE skill_models ADD COLUMN tag_search_vector tsvector`).Error; err != nil {
+			return err
+		}
+	}
+	if err := d.db.WithContext(ctx).Exec(`
+		CREATE INDEX IF NOT EXISTS idx_skill_models_tag_search_vector
+		ON skill_models USING GIN (tag_search_vector)
+	`).Error; err != nil {
+		return err
+	}
 	return nil
 }
 
 func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSummary, error) {
+	req = trimSearchFields(req)
+	if err := validateSearchRequest(req); err != nil {
+		return nil, err
+	}
+	limit, offset := normalizeLimitOffset(req.Limit, req.Offset)
+
 	q := d.db.WithContext(ctx).Model(&skillModel{}).Where("status = ?", "approved")
 
 	if req.ID != "" {
@@ -88,20 +108,9 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 		q = q.Where("name ~* ? OR description ~* ?", pattern, pattern)
 	}
 	if req.Tag != "" {
-		q = q.Where("EXISTS (SELECT 1 FROM unnest(tags) t WHERE t ~* ?)", req.Tag)
+		q = q.Where("tag_search_vector @@ plainto_tsquery('english', ?)", req.Tag)
 	}
 
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	offset := req.Offset
-	if offset < 0 {
-		offset = 0
-	}
 	dbLimit := limit
 	if len(searchTokens(req.Description)) > 1 && dbLimit < 50 {
 		dbLimit = 50
@@ -109,10 +118,18 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 	dbLimit += offset
 
 	var models []skillModel
+	if req.Tag != "" {
+		q = q.Order(clause.Expr{
+			SQL:  "ts_rank_cd(tag_search_vector, plainto_tsquery('english', ?)) DESC",
+			Vars: []any{req.Tag},
+		})
+	}
 	if err := q.Order("created_at DESC, id ASC").Limit(dbLimit).Find(&models).Error; err != nil {
 		return nil, err
 	}
-	rankModels(models, searchTokens(req.Description))
+	if req.Tag == "" {
+		rankModels(models, searchTokens(req.Description))
+	}
 	if offset >= len(models) {
 		return []SkillSummary{}, nil
 	}
@@ -135,6 +152,40 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 		}
 	}
 	return results, nil
+}
+
+func normalizeLimitOffset(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+func trimSearchFields(req SearchRequest) SearchRequest {
+	req.ID = strings.TrimSpace(req.ID)
+	req.Description = strings.TrimSpace(req.Description)
+	req.Tag = strings.TrimSpace(req.Tag)
+	return req
+}
+
+func isAllMatchDescription(description string) bool {
+	return strings.TrimSpace(description) == ".*"
+}
+
+func validateSearchRequest(req SearchRequest) error {
+	if req.ID == "" && req.Description == "" && req.Tag == "" {
+		return errors.New("at least one of id, description, or tag must be provided")
+	}
+	if req.Tag == "" && isAllMatchDescription(req.Description) {
+		return errors.New("description all-match regex requires tag")
+	}
+	return nil
 }
 
 func searchPattern(description string) string {
@@ -219,6 +270,10 @@ func joinTags(tags []string) string {
 	return "{" + strings.Join(escaped, ",") + "}"
 }
 
+func tagSearchText(skill SkillSummary) (tagsText, nameText string) {
+	return strings.Join(skill.Tags, " "), skill.Name
+}
+
 func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error {
 	m := skillModel{
 		ID:          skill.ID,
@@ -228,7 +283,21 @@ func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error
 		Tags:        joinTags(skill.Tags),
 		Status:      "pending",
 	}
-	return d.db.WithContext(ctx).Save(&m).Error
+	if err := d.db.WithContext(ctx).Save(&m).Error; err != nil {
+		return err
+	}
+	return d.updateTagSearchVector(ctx, skill.ID, skill)
+}
+
+func (d *Discovery) updateTagSearchVector(ctx context.Context, id string, skill SkillSummary) error {
+	tagsText, nameText := tagSearchText(skill)
+	return d.db.WithContext(ctx).Exec(`
+		UPDATE skill_models
+		SET tag_search_vector =
+			setweight(to_tsvector('english', coalesce(?, '')), 'A') ||
+			setweight(to_tsvector('english', coalesce(?, '')), 'B')
+		WHERE id = ?
+	`, tagsText, nameText, id).Error
 }
 
 func (d *Discovery) Approve(ctx context.Context, id string) error {

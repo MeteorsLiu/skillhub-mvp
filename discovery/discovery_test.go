@@ -31,7 +31,7 @@ func freshTable(t *testing.T, d *discovery.Discovery, db *gorm.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		db.WithContext(context.Background()).Exec("TRUNCATE skills")
+		db.WithContext(context.Background()).Exec("TRUNCATE skill_models")
 	})
 }
 
@@ -40,20 +40,39 @@ func TestInit(t *testing.T) {
 	d := discovery.New(db, nil)
 	ctx := context.Background()
 
-	db.WithContext(ctx).Exec("DROP TABLE IF EXISTS skills")
+	db.WithContext(ctx).Exec("DROP TABLE IF EXISTS skill_models")
 
 	if err := d.Init(ctx); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 
 	var exists bool
-	db.WithContext(ctx).Raw("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'skills')").Scan(&exists)
+	db.WithContext(ctx).Raw("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'skill_models')").Scan(&exists)
 	if !exists {
-		t.Fatal("skills table was not created")
+		t.Fatal("skill_models table was not created")
 	}
 
 	if err := d.Init(ctx); err != nil {
 		t.Fatalf("Init (second call) failed: %v", err)
+	}
+}
+
+func TestInitCreatesTagSearchVector(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	var exists bool
+	db.WithContext(ctx).Raw(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.columns
+			WHERE table_name = 'skill_models'
+			AND column_name = 'tag_search_vector'
+		)
+	`).Scan(&exists)
+	if !exists {
+		t.Fatal("tag_search_vector column was not created")
 	}
 }
 
@@ -163,6 +182,91 @@ func TestSearchByTag(t *testing.T) {
 	}
 	if results[0].ID != "s1" {
 		t.Errorf("expected 's1', got %q", results[0].ID)
+	}
+}
+
+func TestSearchBySemanticTagUsesTagsAndName(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	skills := []discovery.SkillSummary{
+		{ID: "finance-stock", Name: "Stock Market Lookup", Tags: []string{"finance", "market"}},
+		{ID: "persona-jobs", Name: "Steve Jobs Persona", Tags: []string{"persona", "style"}},
+	}
+	for _, s := range skills {
+		if err := d.RegisterSkill(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Approve(ctx, s.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "finance market"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %+v", len(results), results)
+	}
+	if results[0].ID != "finance-stock" {
+		t.Fatalf("expected finance-stock, got %q", results[0].ID)
+	}
+}
+
+func TestSearchTagIsNotRegex(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	for _, s := range []discovery.SkillSummary{
+		{ID: "finance-stock", Name: "Stock Lookup", Tags: []string{"finance"}},
+		{ID: "weather-current", Name: "Weather Lookup", Tags: []string{"weather"}},
+	} {
+		if err := d.RegisterSkill(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Approve(ctx, s.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: ".*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected regex-like tag not to enumerate rows, got %+v", results)
+	}
+}
+
+func TestSearchTagAllowsAllMatchDescriptionWithinArea(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	for _, s := range []discovery.SkillSummary{
+		{ID: "persona-jobs", Name: "Steve Jobs Persona", Description: "style", Tags: []string{"persona"}},
+		{ID: "finance-stock", Name: "Stock Lookup", Description: "price", Tags: []string{"finance"}},
+	} {
+		if err := d.RegisterSkill(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Approve(ctx, s.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "persona", Description: ".*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ID != "persona-jobs" {
+		t.Fatalf("expected only persona-jobs, got %+v", results)
 	}
 }
 
@@ -293,6 +397,25 @@ func TestCombinedSearch(t *testing.T) {
 	}
 	if results[0].ID != "repo/skill-a" {
 		t.Errorf("expected 'repo/skill-a', got %q", results[0].ID)
+	}
+}
+
+func TestSearchRejectsAllMatchDescriptionWithoutTag(t *testing.T) {
+	db := connectTestDB(t)
+	d := discovery.New(db, nil)
+	ctx := context.Background()
+	freshTable(t, d, db)
+
+	if err := d.RegisterSkill(ctx, discovery.SkillSummary{ID: "s1", Name: "S1", Description: "anything"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Approve(ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := d.Search(ctx, discovery.SearchRequest{Description: ".*"})
+	if err == nil {
+		t.Fatal("expected search to reject all-match description without tag")
 	}
 }
 
