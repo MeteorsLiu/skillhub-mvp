@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,28 @@ func TestPseudoVersion_ShortHash(t *testing.T) {
 	if r != expected {
 		t.Errorf("expected %q, got %q", expected, r)
 	}
+}
+
+func pseudoVersionForHead(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	hashOut, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse failed: %v\n%s", err, hashOut)
+	}
+	cmd = exec.Command("git", "log", "-1", "--format=%ct")
+	cmd.Dir = dir
+	timeOut, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log failed: %v\n%s", err, timeOut)
+	}
+	unixSeconds := strings.TrimSpace(string(timeOut))
+	sec, err := strconv.ParseInt(unixSeconds, 10, 64)
+	if err != nil {
+		t.Fatalf("parse commit unix time: %v", err)
+	}
+	return vcs.PseudoVersion(strings.TrimSpace(string(hashOut)), time.Unix(sec, 0).UTC())
 }
 
 // RepoURL tests
@@ -298,6 +321,68 @@ func TestClone_Monorepo(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(targetDir, "SKILL.md")); os.IsNotExist(err) {
 		t.Errorf("SKILL.md not found in target after monorepo clone")
+	}
+	cmd = exec.Command("git", "-C", targetDir, "config", "--get", "skillhub.subdir")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git config skillhub.subdir failed: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "skills/my-skill" {
+		t.Errorf("expected skillhub.subdir skills/my-skill, got %q", got)
+	}
+}
+
+func TestClone_PseudoVersion(t *testing.T) {
+	requireGit(t)
+	srcDir := t.TempDir()
+	initRepo(t, srcDir)
+
+	if err := os.WriteFile(filepath.Join(srcDir, "SKILL.md"), []byte("test"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cmd := exec.Command("sh", "-c", "git add . && git commit -m 'add skill'")
+	cmd.Dir = srcDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	targetDir := t.TempDir()
+	version := pseudoVersionForHead(t, srcDir)
+	if err := vcs.Clone(srcDir, version, "", targetDir); err != nil {
+		t.Fatalf("Clone pseudo-version failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(targetDir, "SKILL.md")); os.IsNotExist(err) {
+		t.Errorf("SKILL.md not found in target after pseudo-version clone")
+	}
+}
+
+func TestClone_PseudoVersionMonorepo(t *testing.T) {
+	requireGit(t)
+	srcDir := t.TempDir()
+	initRepo(t, srcDir)
+
+	subDir := filepath.Join(srcDir, "skills", "my-skill")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "SKILL.md"), []byte("test"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cmd := exec.Command("sh", "-c", "git add . && git commit -m 'add skill'")
+	cmd.Dir = srcDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	targetDir := t.TempDir()
+	version := pseudoVersionForHead(t, srcDir)
+	if err := vcs.Clone(srcDir, version, "skills/my-skill", targetDir); err != nil {
+		t.Fatalf("Clone pseudo-version monorepo failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(targetDir, "SKILL.md")); os.IsNotExist(err) {
+		t.Errorf("SKILL.md not found in target after pseudo-version monorepo clone")
 	}
 }
 

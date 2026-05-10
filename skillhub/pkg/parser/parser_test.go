@@ -173,6 +173,35 @@ tags: []
 	}
 }
 
+func TestParseRoot_IDFallbackFromGitSubdir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "-c", "credential.helper=", "remote", "add", "origin", "https://github.com/bob/test-skills").Run()
+	exec.Command("git", "-C", dir, "config", "skillhub.subdir", "skills/weather-query").Run()
+
+	skillPath := filepath.Join(dir, "SKILL.md")
+	os.WriteFile(skillPath, []byte(`---
+name: Weather Query
+description: Weather
+tags: []
+---
+
+# Weather
+`), 0644)
+
+	r, err := parser.ParseRoot(dir)
+	if err != nil {
+		t.Fatalf("ParseRoot failed: %v", err)
+	}
+	if r.ID != "github.com/bob/test-skills/skills/weather-query" {
+		t.Errorf("expected fallback id with subdir, got %q", r.ID)
+	}
+}
+
 func TestParseRoot_NoFallbackWithoutGit(t *testing.T) {
 	dir := t.TempDir()
 	skillPath := filepath.Join(dir, "SKILL.md")

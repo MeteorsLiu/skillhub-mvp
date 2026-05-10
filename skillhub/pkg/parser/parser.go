@@ -193,5 +193,12 @@ func deriveIDFromGit(dir string) (string, error) {
 	if url == "" {
 		return "", fmt.Errorf("empty git remote url")
 	}
+	cmd = exec.Command("git", "-c", "credential.helper=", "-C", dir, "config", "--get", "skillhub.subdir")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		subdir := strings.Trim(strings.TrimSpace(string(out)), "/")
+		if subdir != "" {
+			url = strings.TrimRight(url, "/") + "/" + subdir
+		}
+	}
 	return url, nil
 }

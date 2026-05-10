@@ -72,6 +72,29 @@ func PseudoVersion(commitHash string, commitTime time.Time) string {
 	return fmt.Sprintf("v0.0.0-%s-%s", ts, hash)
 }
 
+func pseudoVersionCommit(version string) string {
+	parts := strings.Split(version, "-")
+	if len(parts) < 3 {
+		return ""
+	}
+	ts := parts[len(parts)-2]
+	hash := parts[len(parts)-1]
+	if len(ts) != 14 || len(hash) < 12 {
+		return ""
+	}
+	for _, c := range ts {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	for _, c := range hash {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return ""
+		}
+	}
+	return hash
+}
+
 func RepoURL(id string) string {
 	parts := strings.SplitN(id, "/", 4)
 	if len(parts) < 3 {
@@ -89,6 +112,13 @@ func SubdirPath(id string) string {
 }
 
 func Clone(repoURL, version, subDir, targetDir string) error {
+	if commit := pseudoVersionCommit(version); commit != "" {
+		if subDir == "" {
+			return cloneCommit(repoURL, commit, targetDir)
+		}
+		return sparseCloneSubdirCommit(repoURL, commit, subDir, targetDir)
+	}
+
 	args := []string{"clone", "--depth", "1", "--branch", version, repoURL}
 	if subDir == "" {
 		args = append(args, targetDir)
@@ -102,7 +132,27 @@ func Clone(repoURL, version, subDir, targetDir string) error {
 	return sparseCloneSubdir(repoURL, version, subDir, targetDir)
 }
 
+func cloneCommit(repoURL, commit, targetDir string) error {
+	cmd := exec.Command("git", "clone", "--filter=blob:none", repoURL, targetDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone failed: %w\n%s", err, out)
+	}
+	cmd = exec.Command("git", "-C", targetDir, "checkout", "--detach", commit)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout failed: %w\n%s", err, out)
+	}
+	return nil
+}
+
 func sparseCloneSubdir(repoURL, version, subDir, targetDir string) error {
+	return sparseCloneSubdirRef(repoURL, version, subDir, targetDir, true)
+}
+
+func sparseCloneSubdirCommit(repoURL, commit, subDir, targetDir string) error {
+	return sparseCloneSubdirRef(repoURL, commit, subDir, targetDir, false)
+}
+
+func sparseCloneSubdirRef(repoURL, ref, subDir, targetDir string, shallow bool) error {
 	tmpDir, err := os.MkdirTemp("", "vcs-clone-*")
 	if err != nil {
 		return err
@@ -133,15 +183,27 @@ func sparseCloneSubdir(repoURL, version, subDir, targetDir string) error {
 	if err := runGit("sparse-checkout", "set", gitPath, gitPath+"/**"); err != nil {
 		return err
 	}
-	if err := runGit("fetch", "--depth=1", "--filter=blob:none", "origin", version); err != nil {
-		return err
-	}
-	if err := runGit("checkout", "FETCH_HEAD"); err != nil {
-		return err
+	if shallow {
+		if err := runGit("fetch", "--depth=1", "--filter=blob:none", "origin", ref); err != nil {
+			return err
+		}
+		if err := runGit("checkout", "FETCH_HEAD"); err != nil {
+			return err
+		}
+	} else {
+		if err := runGit("fetch", "--filter=blob:none", "origin"); err != nil {
+			return err
+		}
+		if err := runGit("checkout", "--detach", ref); err != nil {
+			return err
+		}
 	}
 
 	src := filepath.Join(tmpDir, subDir)
-	return copyDir(src, targetDir)
+	if err := copyDir(src, targetDir); err != nil {
+		return err
+	}
+	return initCopiedGitMetadata(targetDir, repoURL, subDir)
 }
 
 func copyDir(src, dst string) error {
@@ -170,6 +232,22 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(target, data, 0644)
 	})
+}
+
+func initCopiedGitMetadata(targetDir, repoURL, subDir string) error {
+	for _, args := range [][]string{
+		{"init"},
+		{"remote", "add", "origin", repoURL},
+		{"config", "skillhub.subdir", filepath.ToSlash(filepath.Clean(subDir))},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = targetDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git %s failed: %w\n%s", args[0], err, out)
+		}
+	}
+	return nil
 }
 
 func ListRemoteTags(repoURL string) ([]string, error) {
