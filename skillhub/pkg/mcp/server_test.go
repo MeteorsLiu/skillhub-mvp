@@ -78,18 +78,18 @@ func TestToolsList(t *testing.T) {
 	foundSearch := false
 	foundLoad := false
 	for _, tool := range tools {
-		if tool.Name == "skillhub_search" {
+		if tool.Name == "search" {
 			foundSearch = true
 		}
-		if tool.Name == "skillhub_load" {
+		if tool.Name == "load" {
 			foundLoad = true
 		}
 	}
 	if !foundSearch {
-		t.Error("missing skillhub_search")
+		t.Error("missing search")
 	}
 	if !foundLoad {
-		t.Error("missing skillhub_load")
+		t.Error("missing load")
 	}
 }
 
@@ -99,13 +99,13 @@ func TestSearchToolDescribesTagAndDescriptionSemantics(t *testing.T) {
 
 	var search *mcp.Tool
 	for i := range tools {
-		if tools[i].Name == "skillhub_search" {
+		if tools[i].Name == "search" {
 			search = &tools[i]
 			break
 		}
 	}
 	if search == nil {
-		t.Fatal("missing skillhub_search")
+		t.Fatal("missing search")
 	}
 
 	data, err := json.Marshal(search)
@@ -140,7 +140,7 @@ func TestSearch(t *testing.T) {
 			return []types.SkillSummary{{ID: "test", Name: "Test", Version: "v1.0.0", Offset: &offset}}, nil
 		},
 	})
-	result := callTool(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"skillhub_search","arguments":{"id":"test","limit":5,"offset":10}}}`)
+	result := callTool(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search","arguments":{"id":"test","limit":5,"offset":10}}}`)
 	if result.IsError {
 		t.Fatal("tool returned error")
 	}
@@ -172,7 +172,7 @@ func TestLoad(t *testing.T) {
 			return &types.Skill{ID: "test", Name: "Test", Version: "v1.0.0", Body: "content"}, nil
 		},
 	})
-	result := callTool(t, srv, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"skillhub_load","arguments":{"id":"test"}}}`)
+	result := callTool(t, srv, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"load","arguments":{"id":"test"}}}`)
 	if result.IsError {
 		t.Fatal("tool returned error")
 	}
@@ -198,7 +198,7 @@ func TestSearchError(t *testing.T) {
 			return nil, errors.New("search failed")
 		},
 	})
-	result := callTool(t, srv, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"skillhub_search","arguments":{"id":"x"}}}`)
+	result := callTool(t, srv, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search","arguments":{"id":"x"}}}`)
 	if !result.IsError {
 		t.Fatal("expected error result")
 	}
@@ -210,7 +210,7 @@ func TestLoadError(t *testing.T) {
 			return nil, errors.New("load failed")
 		},
 	})
-	result := callTool(t, srv, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"skillhub_load","arguments":{"id":"x"}}}`)
+	result := callTool(t, srv, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"load","arguments":{"id":"x"}}}`)
 	if !result.IsError {
 		t.Fatal("expected error result")
 	}

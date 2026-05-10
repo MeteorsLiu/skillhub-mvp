@@ -17,7 +17,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 			"SkillHub fills capability gaps."),
 	)
 
-	searchTool := mcp.NewTool("skillhub_search",
+	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
 			"SkillHub fills capability gaps.\n"+
 				"\n"+
@@ -63,7 +63,7 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 		return mcp.NewToolResultText(string(data)), nil
 	})
 
-	loadTool := mcp.NewTool("skillhub_load",
+	loadTool := mcp.NewTool("load",
 		mcp.WithDescription(
 			"Load the full instructions for a skill found via skillhub__search. "+
 				"The returned 'body' field contains step-by-step instructions you MUST follow — "+
