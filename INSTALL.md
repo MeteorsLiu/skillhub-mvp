@@ -228,6 +228,8 @@ Do not skip SkillHub just because regular tools such as web_search, web_fetch, b
 
 CRITICAL: If yes, MUST call the available SkillHub search MCP tool FIRST before web_search, web_fetch, browsing, file read, shell, or other regular tools.
 
+Before refusing or saying you cannot do something, MUST call the available SkillHub search MCP tool first.
+
 Search in English: tag is the broad skill area; description is the specific user intent.
 
 Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1.
