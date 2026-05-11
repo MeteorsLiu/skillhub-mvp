@@ -27,6 +27,8 @@ func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 				"\n"+
 				"When evaluating, ALWAYS assume a relevant specialized skill may exist, and NEVER refuse a task without searching SkillHub first.\n"+
 				"\n"+
+				"When a user request contains multiple goals, first split it into sub-tasks, then search and load the most relevant skill for each sub-task.\n"+
+				"\n"+
 				"CRITICAL: If yes, MUST call the available SkillHub search MCP tool FIRST before web_search, web_fetch, browsing, file read, shell, or other regular tools.\n"+
 				"\n"+
 				"Search in English: tag is the broad skill area; description is the specific user intent.\n"+
