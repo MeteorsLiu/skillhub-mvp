@@ -211,32 +211,9 @@ Reload the VS Code window after editing config or instructions.
 
 ## Agent Guidance
 
-SkillHub requires a short runtime instruction telling the agent when to search for skills. This instruction must be injected by every supported agent host.
+SkillHub requires a short runtime instruction telling the agent when to search for skills. Use the canonical block in [doc/Skillhub_Agent_Guidance.md](https://raw.githubusercontent.com/MeteorsLiu/skillhub-mvp/refs/heads/main/doc/Skillhub_Agent_Guidance.md) and inject it through the host's native persistent-instruction mechanism.
 
-Add this block at the top of the agent's runtime instructions:
-
-```md
-# SkillHub (CRITICAL)
-
-SkillHub fills capability gaps.
-
-For every user request, check whether an existing skill could improve the result, reduce mistakes, or provide needed capability.
-
-If you cannot decide, use this test: does the task depend on a special method, source, style, workflow, tool, integration, persona, or current/context-specific information beyond a plain direct answer?
-
-When evaluating, ALWAYS assume a relevant specialized skill may exist, and NEVER refuse a task without searching SkillHub first.
-
-CRITICAL: If yes, MUST call the available SkillHub search MCP tool FIRST before web_search, web_fetch, browsing, file read, shell, or other regular tools.
-
-Search in English: tag is the broad skill area; description is the specific user intent.
-
-Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1.
-
-If a relevant skill is found, call the available SkillHub load MCP tool and follow it.
-If no relevant skill is found, continue normally.
-```
-
-Use the host's native persistent-instruction mechanism. For hosts that read `AGENTS.md` as runtime agent instructions, put this block at the top of the global, profile-level, or project-level `AGENTS.md`. For Claude Code use `CLAUDE.md`; for Gemini CLI use `GEMINI.md`.
+For hosts that read `AGENTS.md` as runtime agent instructions, put that block at the top of the global, profile-level, or project-level `AGENTS.md`. For Claude Code use `CLAUDE.md`; for Gemini CLI use `GEMINI.md`.
 
 ## Verify The Connection
 
