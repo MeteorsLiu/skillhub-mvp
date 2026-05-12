@@ -11,8 +11,9 @@ test("loadGuidance returns the packaged guidance", async () => {
 
   assert.equal(guidance, packaged);
   assert.match(guidance, /Workflow:/);
-  assert.match(guidance, /For every user request, ask whether a skill could help/);
-  assert.match(guidance, /If multiple skills are needed, load the best skill for each sub-task/);
+  assert.match(guidance, /teach you how to do EVERYTHING/);
+  assert.match(guidance, /Would a specialized skill make this task easier, safer, more complete, or more accurate/);
+  assert.match(guidance, /Web search finds information\. SkillHub teaches you how to do the task/);
 });
 
 test("plugin injects canonical guidance through before_prompt_build", async () => {

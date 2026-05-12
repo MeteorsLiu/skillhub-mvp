@@ -115,8 +115,10 @@ func TestSearchToolDescribesTagAndDescriptionSemantics(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"Workflow:",
-		"1. For every user request, ask whether a skill could help you do it better or avoid mistakes",
-		"Use skillhub__search before web_search, web_fetch, browsing, file read, shell, or other regular tools when a skill may help",
+		"SkillHub helps agents find skills that teach them how to do EVERYTHING",
+		"Would a specialized skill make this task easier, safer, more complete, or more accurate",
+		"Web search finds information. SkillHub teaches you how to do the task",
+		"Use skillhub__search before web_search, web_fetch, browser, shell, file tools, or code execution when the task is more than simply retrieving one fact",
 		"English broad skill area hint. Not regex",
 		"English regex pattern for the specific user intent",
 	} {
