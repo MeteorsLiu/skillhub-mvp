@@ -1,0 +1,15 @@
+{
+  "name": "openclaw-skillhub-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "OpenClaw plugin that injects canonical SkillHub agent guidance.",
+  "openclaw": {
+    "extensions": [
+      "./index.mjs"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

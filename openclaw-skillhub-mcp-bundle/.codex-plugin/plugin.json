@@ -1,0 +1,17 @@
+{
+  "name": "skillhub-mcp",
+  "version": "0.1.0",
+  "description": "SkillHub stdio MCP server bundle.",
+  "mcpServers": {
+    "skillhub": {
+      "command": "/opt/skillhub/skillhub",
+      "args": [
+        "serve"
+      ],
+      "env": {
+        "SKILLHUB_DISCOVERY_HOST": "http://localhost:8399",
+        "SKILLHUB_HOME": "/var/lib/skillhub"
+      }
+    }
+  }
+}

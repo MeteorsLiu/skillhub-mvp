@@ -1,10 +1,3 @@
-# SkillHub Agent Guidance
-
-This is the canonical agent-facing guidance for hosts that want agents to discover and load SkillHub skills on demand.
-
-It is runtime guidance for agent behavior, not repository development guidance. Inject it through the host's runtime-instruction mechanism. For hosts that read `AGENTS.md` as runtime agent instructions, put it in the global or profile-level `AGENTS.md`.
-
-```md
 # SkillHub (CRITICAL)
 
 You are an agent. Users may ask you to do things you do not know how to do.
@@ -30,4 +23,3 @@ Examples:
 - Multi-goal request: "Plan my Huizhou trip, and also check hotels and flights." Split into travel planning, hotel search, and flight search. Search/load the best skill for each sub-task.
 
 Search returns at most 100 results. If more candidates are needed, use offset pagination: set `offset` to the last returned offset plus 1.
-```

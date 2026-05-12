@@ -1,0 +1,16 @@
+{
+  "id": "skillhub",
+  "name": "SkillHub",
+  "description": "Injects canonical SkillHub agent guidance into OpenClaw prompt builds.",
+  "activation": {
+    "onStartup": true
+  },
+  "extensions": [
+    "./index.mjs"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

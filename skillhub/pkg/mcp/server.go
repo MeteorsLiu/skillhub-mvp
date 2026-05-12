@@ -14,27 +14,29 @@ import (
 func NewServer(toolImpl types.SkillHubTools) *server.MCPServer {
 	s := server.NewMCPServer("skillhub", "1.0.0",
 		server.WithInstructions(
-			"SkillHub fills capability gaps."),
+			"SkillHub helps agents find skills that teach them how to do almost anything."),
 	)
 
 	searchTool := mcp.NewTool("search",
 		mcp.WithDescription(
-			"SkillHub fills capability gaps.\n"+
+			"Search SkillHub for skills that teach the agent how to do tasks it may not know how to do.\n"+
 				"\n"+
-				"For every user request, check whether an existing skill could improve the result, reduce mistakes, or provide needed capability.\n"+
+				"SkillHub helps agents find skills for tools, workflows, integrations, files, domains, styles, and other specialized capabilities.\n"+
 				"\n"+
-				"If you cannot decide, use this test: does the task depend on a special method, source, style, workflow, tool, integration, persona, or current/context-specific information beyond a plain direct answer?\n"+
+				"Workflow:\n"+
 				"\n"+
-				"When evaluating, ALWAYS assume a relevant specialized skill may exist, and NEVER refuse a task without searching SkillHub first.\n"+
-				"\n"+
-				"When a user request contains multiple goals, first split it into sub-tasks, then search and load the most relevant skill for each sub-task.\n"+
-				"\n"+
-				"CRITICAL: If yes, MUST call the available SkillHub search MCP tool FIRST before web_search, web_fetch, browsing, file read, shell, or other regular tools.\n"+
-				"\n"+
-				"Search in English: tag is the broad skill area; description is the specific user intent.\n"+
+				"1. For every user request, ask whether a skill could help you do it better or avoid mistakes.\n"+
+				"2. If the request has multiple goals, split it into sub-tasks and check each one.\n"+
+				"3. Search SkillHub when the task may need a tool, workflow, integration, source, style, persona, domain method, file handling, or current/context-specific information.\n"+
+				"4. When uncertain, search SkillHub before answering, refusing, browsing, reading files, running commands, executing code, or using regular tools.\n"+
+				"5. Search in English: use tag for the broad area and description for the specific intent.\n"+
+				"6. If a relevant skill is found, load it and follow it.\n"+
+				"7. If multiple skills are needed, load the best skill for each sub-task and combine their instructions.\n"+
+				"8. If no relevant skill is found, continue normally.\n"+
 				"\n"+
 				"Usage notes:\n"+
-				"  - If a relevant skill is found, call the available SkillHub load MCP tool and follow it\n"+
+				"  - Use skillhub__search before web_search, web_fetch, browsing, file read, shell, or other regular tools when a skill may help\n"+
+				"  - If a relevant skill is found, call skillhub__load and follow it\n"+
 				"  - If no relevant skill is found, continue normally\n"+
 				"  - Search returns at most 100 results. If more candidates are needed, use offset pagination: set offset to the last returned offset plus 1"),
 		mcp.WithString("id", mcp.Description("Exact or prefix match on skill ID")),

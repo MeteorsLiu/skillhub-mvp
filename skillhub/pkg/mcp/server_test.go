@@ -114,7 +114,9 @@ func TestSearchToolDescribesTagAndDescriptionSemantics(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"Search skillhub__search in English: tag is the broad skill area; description is the specific user intent",
+		"Workflow:",
+		"1. For every user request, ask whether a skill could help you do it better or avoid mistakes",
+		"Use skillhub__search before web_search, web_fetch, browsing, file read, shell, or other regular tools when a skill may help",
 		"English broad skill area hint. Not regex",
 		"English regex pattern for the specific user intent",
 	} {
