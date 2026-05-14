@@ -65,6 +65,7 @@ SKILLHUB_DATABASE_URL=postgres://localhost:5432/skillhub skillhub load github.co
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `SKILLHUB_DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `SKILLHUB_EMBED_URL` | Yes for semantic discovery | — | Embedding API endpoint, e.g. `http://127.0.0.1:8397/v1/embed` |
 | `SKILLHUB_HOME` | No | `$HOME/.skillhub` | Local skill installation root |
 | `VT_API_KEY` | No | — | VirusTotal API key (optional scanning) |
 
@@ -72,7 +73,7 @@ SKILLHUB_DATABASE_URL=postgres://localhost:5432/skillhub skillhub load github.co
 
 - **MVS dependency resolution**: BFS-based, keeps highest version for duplicate IDs. Subtree-level (not fully global) due to lazy depFetcher.
 - **Security scanning**: Three-layer (rules → VirusTotal → AI review). Only RuleScanner is always active; VT requires API key.
-- **Discovery center**: PostgreSQL with regex-based search (`~*` for description/tags, `LIKE` for ID prefix). No pg_trgm/pgvector for now — added when performance requires.
+- **Discovery center**: PostgreSQL + pgvector semantic search for description/tag intent; ID search still uses exact/prefix matching. Local cache must not short-circuit discovery search.
 - **SKILL.md format**: YAML frontmatter (`---` delimited) with `id`, `name`, `description`, `tags`, `dependencies.{tools,skills}`, `skills` fields.
 - **Local layout**: `$SKILLHUB_HOME/skills/{host}/{owner}/{repo}/.../{rest}/{version}/`
 - **MCP transport**: JSON-RPC 2.0 over stdio, compatible with Claude Code and other MCP hosts.

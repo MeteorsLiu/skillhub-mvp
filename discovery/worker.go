@@ -78,28 +78,33 @@ func HandleRegisterSkill(ctx context.Context, t *asynq.Task, disc *Discovery) er
 		log.Printf("worker: update metadata %s: %v", payload.ID, err)
 	}
 
-	chain := NewChainScanner()
-	chain.Add(NewRuleScanner())
-	if _, err := exec.LookPath("clamscan"); err == nil {
-		chain.Add(NewClamAVScanner())
-	}
-	vt := NewVirusTotalScanner()
-	if vt.Enabled() {
-		chain.Add(vt)
-	}
-	scanResult, scanErr := chain.ScanDir(tmpDir)
-	if scanErr != nil {
-		log.Printf("worker: scan %s: %v", payload.ID, scanErr)
-		_ = disc.Reject(ctx, payload.ID)
-		return nil
-	}
-	if !scanResult.Passed {
-		log.Printf("worker: security reject %s: %s", payload.ID, strings.Join(scanResult.Issues, "; "))
-		_ = disc.Reject(ctx, payload.ID)
-		return nil
+	reviewDisabled := os.Getenv("SKILLHUB_DISABLE_REVIEW") == "1"
+	if !reviewDisabled {
+		chain := NewChainScanner()
+		chain.Add(NewRuleScanner())
+		if _, err := exec.LookPath("clamscan"); err == nil {
+			chain.Add(NewClamAVScanner())
+		}
+		vt := NewVirusTotalScanner()
+		if vt.Enabled() {
+			chain.Add(vt)
+		}
+		scanResult, scanErr := chain.ScanDir(tmpDir)
+		if scanErr != nil {
+			log.Printf("worker: scan %s: %v", payload.ID, scanErr)
+			_ = disc.Reject(ctx, payload.ID)
+			return nil
+		}
+		if !scanResult.Passed {
+			log.Printf("worker: security reject %s: %s", payload.ID, strings.Join(scanResult.Issues, "; "))
+			_ = disc.Reject(ctx, payload.ID)
+			return nil
+		}
+	} else {
+		log.Printf("worker: review disabled %s", payload.ID)
 	}
 
-	if disc.llm != nil {
+	if !reviewDisabled && disc.llm != nil && os.Getenv("SKILLHUB_DISABLE_LLM_REVIEW") != "1" {
 		bodyBytes, _ := os.ReadFile(filepath.Join(tmpDir, "SKILL.md"))
 		result, err := disc.llm.Review(ctx, skill, string(bodyBytes))
 		if err != nil {

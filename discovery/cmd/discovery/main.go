@@ -45,7 +45,12 @@ func main() {
 		llm = discovery.NewOpenAIReviewer()
 	}
 
-	disc := discovery.New(db, llm)
+	var embedder discovery.Embedder
+	if embedURL := os.Getenv("SKILLHUB_EMBED_URL"); embedURL != "" {
+		embedder = discovery.NewHTTPEmbedder(embedURL)
+	}
+
+	disc := discovery.NewWithEmbedder(db, llm, embedder)
 	if err := disc.Init(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "init: %v\n", err)
 		os.Exit(1)

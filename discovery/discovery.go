@@ -3,14 +3,16 @@ package discovery
 import (
 	"context"
 	"errors"
-	"regexp"
-	"sort"
+	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
+
+const EmbeddingDimensions = 384
 
 type SkillSummary struct {
 	ID          string   `json:"id"`
@@ -38,6 +40,10 @@ type LLMReviewer interface {
 	Review(ctx context.Context, skill SkillSummary, body string) (*ReviewResult, error)
 }
 
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
 type ReviewResult struct {
 	Passed bool
 	Reason string
@@ -45,28 +51,36 @@ type ReviewResult struct {
 }
 
 type skillModel struct {
-	ID              string `gorm:"primaryKey"`
-	Name            string `gorm:"default:''"`
-	Description     string `gorm:"default:''"`
-	Version         string `gorm:"default:''"`
-	Tags            string `gorm:"type:text[];default:'{}'"`
-	TagSearchVector string `gorm:"type:tsvector"`
-	Status          string `gorm:"default:'pending'"`
-	Source          string `gorm:"default:''"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID          string  `gorm:"primaryKey"`
+	Name        string  `gorm:"default:''"`
+	Description string  `gorm:"default:''"`
+	Version     string  `gorm:"default:''"`
+	Tags        string  `gorm:"type:text[];default:'{}'"`
+	Embedding   *string `gorm:"type:vector(384)"`
+	Status      string  `gorm:"default:'pending'"`
+	Source      string  `gorm:"default:''"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type Discovery struct {
-	db  *gorm.DB
-	llm LLMReviewer
+	db       *gorm.DB
+	llm      LLMReviewer
+	embedder Embedder
 }
 
 func New(db *gorm.DB, llm LLMReviewer) *Discovery {
 	return &Discovery{db: db, llm: llm}
 }
 
+func NewWithEmbedder(db *gorm.DB, llm LLMReviewer, embedder Embedder) *Discovery {
+	return &Discovery{db: db, llm: llm, embedder: embedder}
+}
+
 func (d *Discovery) Init(ctx context.Context) error {
+	if err := d.db.WithContext(ctx).Exec(`CREATE EXTENSION IF NOT EXISTS vector`).Error; err != nil {
+		return err
+	}
 	if err := d.db.WithContext(ctx).AutoMigrate(&skillModel{}); err != nil {
 		return err
 	}
@@ -77,14 +91,14 @@ func (d *Discovery) Init(ctx context.Context) error {
 	if !d.db.Migrator().HasColumn(&skillModel{}, "status") {
 		d.db.WithContext(ctx).Exec(`ALTER TABLE skill_models ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`)
 	}
-	if !d.db.Migrator().HasColumn(&skillModel{}, "tag_search_vector") {
-		if err := d.db.WithContext(ctx).Exec(`ALTER TABLE skill_models ADD COLUMN tag_search_vector tsvector`).Error; err != nil {
+	if !d.db.Migrator().HasColumn(&skillModel{}, "embedding") {
+		if err := d.db.WithContext(ctx).Exec(fmt.Sprintf(`ALTER TABLE skill_models ADD COLUMN embedding vector(%d)`, EmbeddingDimensions)).Error; err != nil {
 			return err
 		}
 	}
 	if err := d.db.WithContext(ctx).Exec(`
-		CREATE INDEX IF NOT EXISTS idx_skill_models_tag_search_vector
-		ON skill_models USING GIN (tag_search_vector)
+		CREATE INDEX IF NOT EXISTS idx_skill_models_embedding
+		ON skill_models USING hnsw (embedding vector_cosine_ops)
 	`).Error; err != nil {
 		return err
 	}
@@ -98,47 +112,67 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 	}
 	limit, offset := normalizeLimitOffset(req.Limit, req.Offset)
 
-	q := d.db.WithContext(ctx).Model(&skillModel{}).Where("status = ?", "approved")
-
-	if req.ID != "" {
-		q = q.Where("id = ? OR id LIKE ?", req.ID, req.ID+"/%")
-	}
-	if req.Description != "" {
-		pattern := searchPattern(req.Description)
-		q = q.Where("name ~* ? OR description ~* ?", pattern, pattern)
-	}
-	if req.Tag != "" {
-		q = q.Where("tag_search_vector @@ plainto_tsquery('english', ?)", req.Tag)
+	if req.Description == "" && req.Tag == "" {
+		return d.searchByID(ctx, req.ID, limit, offset)
 	}
 
-	dbLimit := limit
-	if len(searchTokens(req.Description)) > 1 && dbLimit < 50 {
-		dbLimit = 50
-	}
-	dbLimit += offset
+	return d.searchByEmbedding(ctx, req, limit, offset)
+}
+
+func (d *Discovery) searchByID(ctx context.Context, id string, limit, offset int) ([]SkillSummary, error) {
+	q := d.db.WithContext(ctx).Model(&skillModel{}).
+		Select("id, name, description, version, tags, status, source, created_at, updated_at").
+		Where("status = ?", "approved").
+		Where("id = ? OR id LIKE ?", id, id+"/%").
+		Order("id ASC").
+		Limit(limit).
+		Offset(offset)
 
 	var models []skillModel
-	if req.Tag != "" {
-		q = q.Order(clause.Expr{
-			SQL:  "ts_rank_cd(tag_search_vector, plainto_tsquery('english', ?)) DESC",
-			Vars: []any{req.Tag},
-		})
-	}
-	if err := q.Order("created_at DESC, id ASC").Limit(dbLimit).Find(&models).Error; err != nil {
+	if err := q.Find(&models).Error; err != nil {
 		return nil, err
 	}
-	if req.Tag == "" {
-		rankModels(models, searchTokens(req.Description))
-	}
-	if offset >= len(models) {
-		return []SkillSummary{}, nil
-	}
-	end := offset + limit
-	if end > len(models) {
-		end = len(models)
-	}
-	models = models[offset:end]
+	return summariesFromModels(models, offset), nil
+}
 
+func (d *Discovery) searchByEmbedding(ctx context.Context, req SearchRequest, limit, offset int) ([]SkillSummary, error) {
+	if d.embedder == nil {
+		return nil, errors.New("semantic search requires embedding service")
+	}
+	vectors, err := d.embedder.Embed(ctx, []string{searchEmbeddingText(req)})
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) != 1 {
+		return nil, fmt.Errorf("embedding service returned %d vectors, expected 1", len(vectors))
+	}
+	vector, err := vectorLiteral(vectors[0])
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+		SELECT id, name, description, version, tags, status, source, created_at, updated_at
+		FROM skill_models
+		WHERE status = ? AND embedding IS NOT NULL`
+	args := []any{"approved"}
+	if req.ID != "" {
+		query += ` AND (id = ? OR id LIKE ?)`
+		args = append(args, req.ID, req.ID+"/%")
+	}
+	query += `
+		ORDER BY embedding <=> ?::vector ASC, created_at DESC, id ASC
+		LIMIT ? OFFSET ?`
+	args = append(args, vector, limit, offset)
+
+	var models []skillModel
+	if err := d.db.WithContext(ctx).Raw(query, args...).Scan(&models).Error; err != nil {
+		return nil, err
+	}
+	return summariesFromModels(models, offset), nil
+}
+
+func summariesFromModels(models []skillModel, offset int) []SkillSummary {
 	results := make([]SkillSummary, len(models))
 	for i, m := range models {
 		resultOffset := offset + i
@@ -151,7 +185,7 @@ func (d *Discovery) Search(ctx context.Context, req SearchRequest) ([]SkillSumma
 			Offset:      &resultOffset,
 		}
 	}
-	return results, nil
+	return results
 }
 
 func normalizeLimitOffset(limit, offset int) (int, int) {
@@ -174,73 +208,11 @@ func trimSearchFields(req SearchRequest) SearchRequest {
 	return req
 }
 
-func isAllMatchDescription(description string) bool {
-	return strings.TrimSpace(description) == ".*"
-}
-
 func validateSearchRequest(req SearchRequest) error {
 	if req.ID == "" && req.Description == "" && req.Tag == "" {
 		return errors.New("at least one of id, description, or tag must be provided")
 	}
-	if req.Tag == "" && isAllMatchDescription(req.Description) {
-		return errors.New("description all-match regex requires tag")
-	}
 	return nil
-}
-
-func searchPattern(description string) string {
-	parts := searchTokens(description)
-	if len(parts) > 1 {
-		for i, part := range parts {
-			parts[i] = regexp.QuoteMeta(part)
-		}
-		return strings.Join(parts, "|")
-	}
-	return description
-}
-
-func searchTokens(description string) []string {
-	fields := strings.Fields(description)
-	tokens := make([]string, 0, len(fields))
-	for _, field := range fields {
-		token := strings.Trim(field, " \t\r\n,.;:!?\"'`()[]{}<>")
-		if token != "" {
-			tokens = append(tokens, token)
-		}
-	}
-	return tokens
-}
-
-func rankModels(models []skillModel, tokens []string) {
-	if len(tokens) == 0 {
-		return
-	}
-	sort.SliceStable(models, func(i, j int) bool {
-		left := modelScore(models[i], tokens)
-		right := modelScore(models[j], tokens)
-		if left != right {
-			return left > right
-		}
-		if !models[i].CreatedAt.Equal(models[j].CreatedAt) {
-			return models[i].CreatedAt.After(models[j].CreatedAt)
-		}
-		return models[i].ID < models[j].ID
-	})
-}
-
-func modelScore(m skillModel, tokens []string) int {
-	nameID := strings.ToLower(m.Name + " " + m.ID)
-	text := strings.ToLower(nameID + " " + m.Description)
-	score := 0
-	for _, token := range tokens {
-		token = strings.ToLower(token)
-		if strings.Contains(nameID, token) {
-			score += 3
-		} else if strings.Contains(text, token) {
-			score++
-		}
-	}
-	return score
 }
 
 func parseTags(s string) []string {
@@ -270,10 +242,6 @@ func joinTags(tags []string) string {
 	return "{" + strings.Join(escaped, ",") + "}"
 }
 
-func tagSearchText(skill SkillSummary) (tagsText, nameText, descriptionText string) {
-	return strings.Join(skill.Tags, " "), skill.Name, skill.Description
-}
-
 func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error {
 	m := skillModel{
 		ID:          skill.ID,
@@ -286,7 +254,7 @@ func (d *Discovery) RegisterSkill(ctx context.Context, skill SkillSummary) error
 	if err := d.db.WithContext(ctx).Save(&m).Error; err != nil {
 		return err
 	}
-	return d.updateTagSearchVector(ctx, skill.ID, skill)
+	return d.updateEmbedding(ctx, skill.ID, skill)
 }
 
 func (d *Discovery) BackfillSkillMetadata(ctx context.Context, skill SkillSummary) error {
@@ -309,19 +277,25 @@ func (d *Discovery) BackfillSkillMetadata(ctx context.Context, skill SkillSummar
 	if err := d.db.WithContext(ctx).Model(&skillModel{}).Where("id = ?", skill.ID).Updates(updates).Error; err != nil {
 		return err
 	}
-	return d.updateTagSearchVector(ctx, skill.ID, skill)
+	return d.updateEmbedding(ctx, skill.ID, skill)
 }
 
-func (d *Discovery) updateTagSearchVector(ctx context.Context, id string, skill SkillSummary) error {
-	tagsText, nameText, descriptionText := tagSearchText(skill)
-	return d.db.WithContext(ctx).Exec(`
-		UPDATE skill_models
-		SET tag_search_vector =
-			setweight(to_tsvector('english', coalesce(?, '')), 'A') ||
-			setweight(to_tsvector('english', coalesce(?, '')), 'B') ||
-			setweight(to_tsvector('english', coalesce(?, '')), 'C')
-		WHERE id = ?
-	`, tagsText, nameText, descriptionText, id).Error
+func (d *Discovery) updateEmbedding(ctx context.Context, id string, skill SkillSummary) error {
+	if d.embedder == nil {
+		return nil
+	}
+	vectors, err := d.embedder.Embed(ctx, []string{skillEmbeddingText(skill)})
+	if err != nil {
+		return err
+	}
+	if len(vectors) != 1 {
+		return fmt.Errorf("embedding service returned %d vectors, expected 1", len(vectors))
+	}
+	vector, err := vectorLiteral(vectors[0])
+	if err != nil {
+		return err
+	}
+	return d.db.WithContext(ctx).Exec(`UPDATE skill_models SET embedding = ?::vector WHERE id = ?`, vector, id).Error
 }
 
 func (d *Discovery) Approve(ctx context.Context, id string) error {
@@ -342,4 +316,49 @@ func (d *Discovery) ListPending(ctx context.Context) ([]RegisterRequest, error) 
 		reqs[i] = RegisterRequest{ID: m.ID, Version: m.Version}
 	}
 	return reqs, nil
+}
+
+func skillEmbeddingText(skill SkillSummary) string {
+	var parts []string
+	if skill.ID != "" {
+		parts = append(parts, "id: "+skill.ID)
+	}
+	if skill.Name != "" {
+		parts = append(parts, "name: "+skill.Name)
+	}
+	if skill.Description != "" {
+		parts = append(parts, "description: "+skill.Description)
+	}
+	if len(skill.Tags) > 0 {
+		parts = append(parts, "tags: "+strings.Join(skill.Tags, ", "))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func searchEmbeddingText(req SearchRequest) string {
+	var parts []string
+	if req.Tag != "" {
+		parts = append(parts, "tag: "+req.Tag)
+	}
+	if req.Description != "" {
+		parts = append(parts, "intent: "+req.Description)
+	}
+	if req.ID != "" {
+		parts = append(parts, "id: "+req.ID)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func vectorLiteral(values []float32) (string, error) {
+	if len(values) != EmbeddingDimensions {
+		return "", fmt.Errorf("embedding has %d dimensions, expected %d", len(values), EmbeddingDimensions)
+	}
+	parts := make([]string, len(values))
+	for i, value := range values {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return "", fmt.Errorf("embedding contains invalid value at dimension %d", i)
+		}
+		parts[i] = strconv.FormatFloat(float64(value), 'g', -1, 32)
+	}
+	return "[" + strings.Join(parts, ",") + "]", nil
 }

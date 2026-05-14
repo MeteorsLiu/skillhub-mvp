@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/postgres"
@@ -11,6 +12,38 @@ import (
 
 	"discovery"
 )
+
+type fakeEmbedder struct{}
+
+func (fakeEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, text := range texts {
+		out[i] = fakeEmbedding(text)
+	}
+	return out, nil
+}
+
+func fakeEmbedding(text string) []float32 {
+	vector := make([]float32, discovery.EmbeddingDimensions)
+	text = strings.ToLower(text)
+	switch {
+	case strings.Contains(text, "finance") || strings.Contains(text, "stock") || strings.Contains(text, "market"):
+		vector[0] = 1
+	case strings.Contains(text, "weather"):
+		vector[1] = 1
+	case strings.Contains(text, "persona") || strings.Contains(text, "style"):
+		vector[2] = 1
+	case strings.Contains(text, "hello") || strings.Contains(text, "go"):
+		vector[3] = 1
+	case strings.Contains(text, "python"):
+		vector[4] = 1
+	case strings.Contains(text, "common") || strings.Contains(text, "skill"):
+		vector[5] = 1
+	default:
+		vector[6] = 1
+	}
+	return vector
+}
 
 func connectTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -35,9 +68,13 @@ func freshTable(t *testing.T, d *discovery.Discovery, db *gorm.DB) {
 	})
 }
 
+func newSemanticDiscovery(db *gorm.DB) *discovery.Discovery {
+	return discovery.NewWithEmbedder(db, nil, fakeEmbedder{})
+}
+
 func TestInit(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 
 	db.WithContext(ctx).Exec("DROP TABLE IF EXISTS skill_models")
@@ -57,9 +94,9 @@ func TestInit(t *testing.T) {
 	}
 }
 
-func TestInitCreatesTagSearchVector(t *testing.T) {
+func TestInitCreatesEmbeddingColumn(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -68,17 +105,17 @@ func TestInitCreatesTagSearchVector(t *testing.T) {
 		SELECT EXISTS (
 			SELECT FROM information_schema.columns
 			WHERE table_name = 'skill_models'
-			AND column_name = 'tag_search_vector'
+			AND column_name = 'embedding'
 		)
 	`).Scan(&exists)
 	if !exists {
-		t.Fatal("tag_search_vector column was not created")
+		t.Fatal("embedding column was not created")
 	}
 }
 
 func TestRegisterAndSearch(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -125,7 +162,7 @@ func TestRegisterAndSearch(t *testing.T) {
 
 func TestSearchByDescription(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -142,7 +179,7 @@ func TestSearchByDescription(t *testing.T) {
 		}
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Description: "hello"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Description: "hello", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +193,7 @@ func TestSearchByDescription(t *testing.T) {
 
 func TestSearchByTag(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -173,7 +210,7 @@ func TestSearchByTag(t *testing.T) {
 		}
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "go"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "go", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +224,7 @@ func TestSearchByTag(t *testing.T) {
 
 func TestSearchBySemanticTagUsesTagsAndName(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -204,7 +241,7 @@ func TestSearchBySemanticTagUsesTagsAndName(t *testing.T) {
 		}
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "finance market"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "finance market", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,36 +253,9 @@ func TestSearchBySemanticTagUsesTagsAndName(t *testing.T) {
 	}
 }
 
-func TestSearchTagIsNotRegex(t *testing.T) {
+func TestSearchUsesNaturalLanguageInsteadOfRegex(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
-	ctx := context.Background()
-	freshTable(t, d, db)
-
-	for _, s := range []discovery.SkillSummary{
-		{ID: "finance-stock", Name: "Stock Lookup", Tags: []string{"finance"}},
-		{ID: "weather-current", Name: "Weather Lookup", Tags: []string{"weather"}},
-	} {
-		if err := d.RegisterSkill(ctx, s); err != nil {
-			t.Fatal(err)
-		}
-		if err := d.Approve(ctx, s.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	results, err := d.Search(ctx, discovery.SearchRequest{Tag: ".*"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("expected regex-like tag not to enumerate rows, got %+v", results)
-	}
-}
-
-func TestSearchTagAllowsAllMatchDescriptionWithinArea(t *testing.T) {
-	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -261,18 +271,18 @@ func TestSearchTagAllowsAllMatchDescriptionWithinArea(t *testing.T) {
 		}
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "persona", Description: ".*"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "persona style", Description: "writing style", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(results) != 1 || results[0].ID != "persona-jobs" {
-		t.Fatalf("expected only persona-jobs, got %+v", results)
+		t.Fatalf("expected persona-jobs first, got %+v", results)
 	}
 }
 
 func TestSearchPrefixID(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -305,7 +315,7 @@ func TestSearchPrefixID(t *testing.T) {
 
 func TestSearchOnlyApproved(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -322,7 +332,7 @@ func TestSearchOnlyApproved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Description: "common"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Description: "common", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +346,7 @@ func TestSearchOnlyApproved(t *testing.T) {
 
 func TestApprove(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -370,7 +380,7 @@ func TestApprove(t *testing.T) {
 
 func TestCombinedSearch(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -388,7 +398,7 @@ func TestCombinedSearch(t *testing.T) {
 		}
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Description: "hello", Tag: "go"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Description: "hello", Tag: "go", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,28 +410,9 @@ func TestCombinedSearch(t *testing.T) {
 	}
 }
 
-func TestSearchRejectsAllMatchDescriptionWithoutTag(t *testing.T) {
-	db := connectTestDB(t)
-	d := discovery.New(db, nil)
-	ctx := context.Background()
-	freshTable(t, d, db)
-
-	if err := d.RegisterSkill(ctx, discovery.SkillSummary{ID: "s1", Name: "S1", Description: "anything"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Approve(ctx, "s1"); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := d.Search(ctx, discovery.SearchRequest{Description: ".*"})
-	if err == nil {
-		t.Fatal("expected search to reject all-match description without tag")
-	}
-}
-
 func TestSearchDefaultLimit(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -446,7 +437,7 @@ func TestSearchDefaultLimit(t *testing.T) {
 
 func TestSearchOffsetPagination(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -476,7 +467,7 @@ func TestSearchOffsetPagination(t *testing.T) {
 
 func TestRegisterUpdatesExisting(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -510,7 +501,7 @@ func TestRegisterUpdatesExisting(t *testing.T) {
 
 func TestBackfillSkillMetadataPreservesApproval(t *testing.T) {
 	db := connectTestDB(t)
-	d := discovery.New(db, nil)
+	d := newSemanticDiscovery(db)
 	ctx := context.Background()
 	freshTable(t, d, db)
 
@@ -532,7 +523,7 @@ func TestBackfillSkillMetadataPreservesApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "finance", Description: ".*"})
+	results, err := d.Search(ctx, discovery.SearchRequest{Tag: "finance", Description: "stock price lookup", Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
