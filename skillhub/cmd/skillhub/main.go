@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,8 @@ import (
 )
 
 var httpAddr = flag.String("http", "", "Serve over HTTP on this address (e.g. :8398). Empty means stdio.")
+
+const skillResourceRoot = "/tmp/.llar"
 
 func main() {
 	flag.Parse()
@@ -89,6 +93,88 @@ func selectInstalledVersion(installPath string) string {
 	return latest
 }
 
+func resourceCacheDir(rootID, version string) (string, error) {
+	escaped, err := filepath.Localize(rootID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(skillResourceRoot, escaped+"@"+version), nil
+}
+
+func prepareResourceDirectory(srcDir, rootID, version string) (string, error) {
+	dstDir, err := resourceCacheDir(rootID, version)
+	if err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(dstDir); err != nil {
+		return "", err
+	}
+	if err := copyResourcesWithoutSkillMD(srcDir, dstDir); err != nil {
+		return "", err
+	}
+	return dstDir, nil
+}
+
+func copyResourcesWithoutSkillMD(srcDir, dstDir string) error {
+	return filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(dstDir, 0755)
+		}
+		if d.Name() == ".git" && d.IsDir() {
+			return filepath.SkipDir
+		}
+		if d.Name() == "SKILL.md" {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+
+		target := filepath.Join(dstDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		return copyFile(path, target, info.Mode().Perm())
+	})
+}
+
+func copyFile(src, dst string, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
 func extractFirstLine(body string) string {
 	body = strings.TrimSpace(body)
 	if idx := strings.IndexByte(body, '\n'); idx >= 0 {
@@ -136,8 +222,12 @@ func cmdServeHTTP() {
 }
 
 type mcpCore struct {
-	client *discoveryclient.Client
+	client discoverySearcher
 	cache  *cachepkg.Cache
+}
+
+type discoverySearcher interface {
+	Search(ctx context.Context, req discoveryclient.SearchRequest) ([]discoveryclient.SkillSummary, error)
 }
 
 func (c *mcpCore) splitSubSkill(id string) (rootID, subPath string) {
@@ -162,9 +252,9 @@ func (c *mcpCore) splitSubSkill(id string) (rootID, subPath string) {
 
 func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) {
 	if c.cache != nil {
-		results, err := c.cache.Search(req.Description, req.Tag, req.Limit, req.Offset)
-		if err == nil && len(results) > 0 {
-			return results, nil
+		cached, err := c.cache.GetPromotedSearch(req)
+		if err == nil && cached != nil {
+			return cached, nil
 		}
 	}
 
@@ -180,20 +270,21 @@ func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) 
 		return nil, err
 	}
 
+	out := discoveryResultsToTypes(remoteResults)
 	if c.cache != nil {
-		go func() {
-			for _, r := range remoteResults {
-				c.cache.Upsert(types.SkillSummary{
-					ID:          r.ID,
-					Name:        r.Name,
-					Description: r.Description,
-					Version:     r.Version,
-					Tags:        r.Tags,
-				}, "remote")
-			}
-		}()
+		if ok, err := c.cache.ShouldPromoteSearch(req); err == nil && ok {
+			_ = c.cache.PutPromotedSearch(req, out)
+		}
+		_ = c.cache.RecordSearchObservation(req, out)
+		for _, r := range out {
+			_ = c.cache.Upsert(r, "remote")
+		}
 	}
 
+	return out, nil
+}
+
+func discoveryResultsToTypes(remoteResults []discoveryclient.SkillSummary) []types.SkillSummary {
 	out := make([]types.SkillSummary, len(remoteResults))
 	for i, r := range remoteResults {
 		out[i] = types.SkillSummary{
@@ -205,7 +296,7 @@ func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) 
 			Offset:      r.Offset,
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (c *mcpCore) Load(req types.LoadRequest) (*types.Skill, error) {
@@ -258,6 +349,11 @@ func (c *mcpCore) Load(req types.LoadRequest) (*types.Skill, error) {
 	if loadErr != nil {
 		return nil, loadErr
 	}
+	resourceDir, err := prepareResourceDirectory(fullPath, rootID, version)
+	if err != nil {
+		return nil, fmt.Errorf("prepare resource directory: %w", err)
+	}
+	skill.ResourceDirectory = resourceDir
 
 	if c.cache != nil {
 		c.cache.Upsert(types.SkillSummary{
@@ -288,12 +384,7 @@ func cmdSearch(args []string) {
 	}
 
 	client := discoveryclient.New(discoveryBaseURL())
-	req := discoveryclient.SearchRequest{
-		ID:          args[0],
-		Description: args[0],
-		Tag:         args[0],
-		Limit:       20,
-	}
+	req := searchRequestFromQuery(args[0])
 
 	results, err := client.Search(context.Background(), req)
 	if err != nil {
@@ -307,6 +398,14 @@ func cmdSearch(args []string) {
 		os.Exit(1)
 	}
 	fmt.Println(string(data))
+}
+
+func searchRequestFromQuery(query string) discoveryclient.SearchRequest {
+	return discoveryclient.SearchRequest{
+		Description: query,
+		Tag:         query,
+		Limit:       20,
+	}
 }
 
 func cmdLoad(args []string) {
