@@ -17,7 +17,8 @@ import (
 )
 
 type Cache struct {
-	db *sql.DB
+	db        *sql.DB
+	tokenizer *Tokenizer
 }
 
 func Open(dbPath, skillsRoot string) (*Cache, error) {
@@ -41,7 +42,14 @@ func Open(dbPath, skillsRoot string) (*Cache, error) {
 	)`); err != nil {
 		return nil, fmt.Errorf("create table: %w", err)
 	}
-	c := &Cache{db: db}
+	tok, err := NewTokenizer()
+	if err != nil {
+		return nil, fmt.Errorf("init tokenizer: %w", err)
+	}
+	c := &Cache{db: db, tokenizer: tok}
+	if err := c.initSearchCacheSchema(); err != nil {
+		return nil, fmt.Errorf("init search cache schema: %w", err)
+	}
 	if err := c.syncFromFS(skillsRoot); err != nil {
 		return nil, fmt.Errorf("sync from filesystem: %w", err)
 	}

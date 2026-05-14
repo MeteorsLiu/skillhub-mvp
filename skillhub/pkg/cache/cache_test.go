@@ -9,6 +9,16 @@ import (
 	"skillhub/pkg/types"
 )
 
+func openTestCache(t *testing.T) *cache.Cache {
+	t.Helper()
+	dir := t.TempDir()
+	c, err := cache.Open(filepath.Join(dir, "test.db"), filepath.Join(dir, "skills"))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	return c
+}
+
 func TestOpen_CreatesDBAndTable(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -345,5 +355,114 @@ func TestTokenizer_ChineseAndASCIITokens(t *testing.T) {
 		if !got[want] {
 			t.Fatalf("missing token %q from %#v", want, tokens)
 		}
+	}
+}
+
+func TestPromotedSearchCache_DoesNotPromoteFirstObservation(t *testing.T) {
+	c := openTestCache(t)
+	defer c.Close()
+
+	req := types.SearchRequest{Description: "小红书浦东明珠租房补贴", Tag: "xiaohongshu", Limit: 10}
+	results := []types.SkillSummary{{ID: "xiaohongshu-browser", Name: "XHS Browser", Description: "research xiaohongshu"}}
+
+	if hit, err := c.GetPromotedSearch(req); err != nil {
+		t.Fatalf("GetPromotedSearch: %v", err)
+	} else if hit != nil {
+		t.Fatalf("expected no promoted hit before observation, got %+v", hit)
+	}
+
+	if err := c.RecordSearchObservation(req, results); err != nil {
+		t.Fatalf("RecordSearchObservation: %v", err)
+	}
+
+	if ok, err := c.ShouldPromoteSearch(req); err != nil {
+		t.Fatalf("ShouldPromoteSearch: %v", err)
+	} else if ok {
+		t.Fatal("first observation should not promote")
+	}
+}
+
+func TestPromotedSearchCache_PromotesAfterThreeStableObservations(t *testing.T) {
+	c := openTestCache(t)
+	defer c.Close()
+
+	reqs := []types.SearchRequest{
+		{Description: "小红书浦东明珠租房补贴"},
+		{Description: "浦东小红书租房补贴调研"},
+		{Description: "小红书 明珠 租房 补贴"},
+	}
+	resultSets := [][]types.SkillSummary{
+		{{ID: "xiaohongshu-browser"}, {ID: "policy-helper"}, {ID: "web-research"}},
+		{{ID: "xiaohongshu-browser"}, {ID: "policy-helper"}, {ID: "web-research"}},
+		{{ID: "xiaohongshu-browser"}, {ID: "policy-helper"}, {ID: "web-research"}},
+	}
+
+	for i := range reqs {
+		if err := c.RecordSearchObservation(reqs[i], resultSets[i]); err != nil {
+			t.Fatalf("record observation %d: %v", i, err)
+		}
+	}
+
+	ok, err := c.ShouldPromoteSearch(types.SearchRequest{Description: "帮我调研小红书浦东租房补贴"})
+	if err != nil {
+		t.Fatalf("ShouldPromoteSearch: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected stable observations to promote")
+	}
+}
+
+func TestPromotedSearchCache_DoesNotPromoteSplitResults(t *testing.T) {
+	c := openTestCache(t)
+	defer c.Close()
+
+	reqs := []types.SearchRequest{
+		{Description: "小红书浦东租房补贴"},
+		{Description: "小红书爆款笔记写作"},
+		{Description: "小红书账号运营"},
+	}
+	resultSets := [][]types.SkillSummary{
+		{{ID: "housing-policy"}, {ID: "web-research"}, {ID: "xiaohongshu-browser"}},
+		{{ID: "content-writing"}, {ID: "copywriting"}, {ID: "xiaohongshu-browser"}},
+		{{ID: "account-growth"}, {ID: "social-ops"}, {ID: "xiaohongshu-browser"}},
+	}
+
+	for i := range reqs {
+		if err := c.RecordSearchObservation(reqs[i], resultSets[i]); err != nil {
+			t.Fatalf("record observation %d: %v", i, err)
+		}
+	}
+
+	ok, err := c.ShouldPromoteSearch(types.SearchRequest{Description: "小红书浦东明珠租房补贴"})
+	if err != nil {
+		t.Fatalf("ShouldPromoteSearch: %v", err)
+	}
+	if ok {
+		t.Fatal("split remote results should not promote")
+	}
+}
+
+func TestPromotedSearchCache_ReturnsWithinTTL(t *testing.T) {
+	c := openTestCache(t)
+	defer c.Close()
+
+	req := types.SearchRequest{Description: "股票查询 A股 港股 美股 实时行情", Limit: 1}
+	results := []types.SkillSummary{
+		{ID: "stock-lookup", Name: "Stock Lookup"},
+		{ID: "market-news", Name: "Market News"},
+	}
+	if err := c.PutPromotedSearch(req, results); err != nil {
+		t.Fatalf("PutPromotedSearch: %v", err)
+	}
+
+	got, err := c.GetPromotedSearch(req)
+	if err != nil {
+		t.Fatalf("GetPromotedSearch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "stock-lookup" {
+		t.Fatalf("expected limited cached stock result, got %+v", got)
+	}
+	if got[0].Offset == nil || *got[0].Offset != 0 {
+		t.Fatalf("expected offset 0, got %+v", got[0].Offset)
 	}
 }
