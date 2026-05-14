@@ -110,7 +110,21 @@ func (c *Cache) searchPromotedResults(description, tag string, limit, offset int
 	return result, nil
 }
 
-func (c *Cache) PutPromotedSearch(req types.SearchRequest, results []types.SkillSummary) error {
+func (c *Cache) RecordSearch(req types.SearchRequest, results []types.SkillSummary) error {
+	if len(results) == 0 {
+		return nil
+	}
+	if err := c.recordSearchObservation(req, results); err != nil {
+		return err
+	}
+	ok, err := c.shouldPromoteSearch(req)
+	if err != nil || !ok {
+		return err
+	}
+	return c.putPromotedSearch(req, results)
+}
+
+func (c *Cache) putPromotedSearch(req types.SearchRequest, results []types.SkillSummary) error {
 	key := c.promotedSearchKey(req)
 	if _, err := c.db.Exec(`DELETE FROM promoted_search_results_fts WHERE cache_key = ?`, key); err != nil {
 		return err
@@ -139,7 +153,7 @@ func (c *Cache) PutPromotedSearch(req types.SearchRequest, results []types.Skill
 	return tx.Commit()
 }
 
-func (c *Cache) RecordSearchObservation(req types.SearchRequest, results []types.SkillSummary) error {
+func (c *Cache) recordSearchObservation(req types.SearchRequest, results []types.SkillSummary) error {
 	if len(results) == 0 {
 		return nil
 	}
@@ -181,7 +195,7 @@ func (c *Cache) RecordSearchObservation(req types.SearchRequest, results []types
 	return tx.Commit()
 }
 
-func (c *Cache) ShouldPromoteSearch(req types.SearchRequest) (bool, error) {
+func (c *Cache) shouldPromoteSearch(req types.SearchRequest) (bool, error) {
 	observations, err := c.similarObservations(req, 20)
 	if err != nil {
 		return false, err

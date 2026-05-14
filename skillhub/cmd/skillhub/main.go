@@ -273,10 +273,7 @@ func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) 
 
 	out := discoveryResultsToTypes(remoteResults)
 	if c.cache != nil {
-		if ok, err := c.cache.ShouldPromoteSearch(req); err == nil && ok {
-			_ = c.cache.PutPromotedSearch(req, out)
-		}
-		_ = c.cache.RecordSearchObservation(req, out)
+		_ = c.cache.RecordSearch(req, out)
 	}
 
 	return out, nil

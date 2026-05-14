@@ -130,12 +130,12 @@ func TestMCPSearchFirstCallUsesDiscoveryAndRecordsObservation(t *testing.T) {
 		t.Fatalf("expected remote result, got %+v", results)
 	}
 
-	ok, err := c.ShouldPromoteSearch(types.SearchRequest{Description: "local", Limit: 5})
+	cached, err := c.Search("local", "", 5, 0)
 	if err != nil {
-		t.Fatalf("ShouldPromoteSearch: %v", err)
+		t.Fatalf("cache search: %v", err)
 	}
-	if ok {
-		t.Fatal("single observation should not promote")
+	if len(cached) != 0 {
+		t.Fatalf("single observation should not promote, got %+v", cached)
 	}
 }
 
@@ -148,8 +148,10 @@ func TestMCPSearchReturnsBM25CacheHitWithoutDiscovery(t *testing.T) {
 	defer c.Close()
 
 	req := types.SearchRequest{Description: "小红书浦东租房补贴", Limit: 10}
-	if err := c.PutPromotedSearch(req, []types.SkillSummary{{ID: "cached", Name: "Cached Skill"}}); err != nil {
-		t.Fatalf("PutPromotedSearch: %v", err)
+	for i := 0; i < 3; i++ {
+		if err := c.RecordSearch(req, []types.SkillSummary{{ID: "cached", Name: "Cached Skill"}}); err != nil {
+			t.Fatalf("RecordSearch %d: %v", i, err)
+		}
 	}
 
 	client := &fakeDiscoverySearchClient{}
@@ -166,7 +168,7 @@ func TestMCPSearchReturnsBM25CacheHitWithoutDiscovery(t *testing.T) {
 	}
 }
 
-func TestMCPSearchStableObservationsRefreshesDiscoveryThenCaches(t *testing.T) {
+func TestMCPSearchStableObservationsCacheWithoutDiscovery(t *testing.T) {
 	dir := t.TempDir()
 	c, err := cachepkg.Open(filepath.Join(dir, "skillhub.db"), filepath.Join(dir, "skills"))
 	if err != nil {
@@ -179,12 +181,12 @@ func TestMCPSearchStableObservationsRefreshesDiscoveryThenCaches(t *testing.T) {
 		"小红书明珠租房补贴",
 		"浦东小红书租房补贴调研",
 	} {
-		err := c.RecordSearchObservation(
+		err := c.RecordSearch(
 			types.SearchRequest{Description: query},
 			[]types.SkillSummary{{ID: "xiaohongshu-browser"}, {ID: "policy-helper"}},
 		)
 		if err != nil {
-			t.Fatalf("RecordSearchObservation: %v", err)
+			t.Fatalf("RecordSearch: %v", err)
 		}
 	}
 
@@ -198,22 +200,10 @@ func TestMCPSearchStableObservationsRefreshesDiscoveryThenCaches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if client.callCount != 1 {
-		t.Fatalf("expected one discovery refresh, got %d", client.callCount)
+	if client.callCount != 0 {
+		t.Fatalf("expected stable cache hit without discovery, got %d calls", client.callCount)
 	}
-	if len(results) != 1 || results[0].ID != "fresh-xhs" {
-		t.Fatalf("expected fresh discovery result, got %+v", results)
-	}
-
-	client.called = false
-	results, err = core.Search(req)
-	if err != nil {
-		t.Fatalf("second search: %v", err)
-	}
-	if client.called {
-		t.Fatal("second search should hit BM25 cache")
-	}
-	if len(results) != 1 || results[0].ID != "fresh-xhs" {
-		t.Fatalf("expected cached fresh result, got %+v", results)
+	if len(results) == 0 || results[0].ID != "xiaohongshu-browser" {
+		t.Fatalf("expected cached xiaohongshu-browser result, got %+v", results)
 	}
 }

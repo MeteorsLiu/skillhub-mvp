@@ -66,14 +66,14 @@ func TestPromotedSearchCache_DoesNotPromoteFirstObservation(t *testing.T) {
 		t.Fatalf("expected no promoted hit before observation, got %+v", got)
 	}
 
-	if err := c.RecordSearchObservation(req, results); err != nil {
-		t.Fatalf("RecordSearchObservation: %v", err)
+	if err := c.RecordSearch(req, results); err != nil {
+		t.Fatalf("RecordSearch: %v", err)
 	}
 
-	if ok, err := c.ShouldPromoteSearch(req); err != nil {
-		t.Fatalf("ShouldPromoteSearch: %v", err)
-	} else if ok {
-		t.Fatal("first observation should not promote")
+	if got, err := c.Search(req.Description, req.Tag, req.Limit, req.Offset); err != nil {
+		t.Fatalf("Search: %v", err)
+	} else if len(got) != 0 {
+		t.Fatalf("first observation should not promote, got %+v", got)
 	}
 }
 
@@ -93,17 +93,17 @@ func TestPromotedSearchCache_PromotesAfterThreeStableObservations(t *testing.T) 
 	}
 
 	for i := range reqs {
-		if err := c.RecordSearchObservation(reqs[i], resultSets[i]); err != nil {
-			t.Fatalf("record observation %d: %v", i, err)
+		if err := c.RecordSearch(reqs[i], resultSets[i]); err != nil {
+			t.Fatalf("record search %d: %v", i, err)
 		}
 	}
 
-	ok, err := c.ShouldPromoteSearch(types.SearchRequest{Description: "帮我调研小红书浦东租房补贴"})
+	got, err := c.Search("帮我调研小红书浦东租房补贴", "", 10, 0)
 	if err != nil {
-		t.Fatalf("ShouldPromoteSearch: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
-	if !ok {
-		t.Fatal("expected stable observations to promote")
+	if len(got) == 0 || got[0].ID != "xiaohongshu-browser" {
+		t.Fatalf("expected stable observations to promote xiaohongshu-browser, got %+v", got)
 	}
 }
 
@@ -123,17 +123,17 @@ func TestPromotedSearchCache_DoesNotPromoteSplitResults(t *testing.T) {
 	}
 
 	for i := range reqs {
-		if err := c.RecordSearchObservation(reqs[i], resultSets[i]); err != nil {
-			t.Fatalf("record observation %d: %v", i, err)
+		if err := c.RecordSearch(reqs[i], resultSets[i]); err != nil {
+			t.Fatalf("record search %d: %v", i, err)
 		}
 	}
 
-	ok, err := c.ShouldPromoteSearch(types.SearchRequest{Description: "小红书浦东明珠租房补贴"})
+	got, err := c.Search("小红书浦东明珠租房补贴", "", 10, 0)
 	if err != nil {
-		t.Fatalf("ShouldPromoteSearch: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
-	if ok {
-		t.Fatal("split remote results should not promote")
+	if len(got) != 0 {
+		t.Fatalf("split remote results should not promote, got %+v", got)
 	}
 }
 
@@ -146,8 +146,10 @@ func TestPromotedSearchCache_ReturnsWithinTTL(t *testing.T) {
 		{ID: "stock-lookup", Name: "Stock Lookup", Tags: []string{"finance"}},
 		{ID: "market-news", Name: "Market News"},
 	}
-	if err := c.PutPromotedSearch(req, results); err != nil {
-		t.Fatalf("PutPromotedSearch: %v", err)
+	for i := 0; i < 3; i++ {
+		if err := c.RecordSearch(req, results); err != nil {
+			t.Fatalf("RecordSearch %d: %v", i, err)
+		}
 	}
 
 	got, err := c.Search(req.Description, req.Tag, req.Limit, req.Offset)
@@ -169,11 +171,13 @@ func TestPromotedSearchCache_RegexLikeQueryDoesNotEnumerateRows(t *testing.T) {
 	c := openTestCache(t)
 	defer c.Close()
 
-	if err := c.PutPromotedSearch(
-		types.SearchRequest{Description: "stock lookup"},
-		[]types.SkillSummary{{ID: "stock-lookup", Name: "Stock Lookup"}},
-	); err != nil {
-		t.Fatalf("PutPromotedSearch: %v", err)
+	for i := 0; i < 3; i++ {
+		if err := c.RecordSearch(
+			types.SearchRequest{Description: "stock lookup"},
+			[]types.SkillSummary{{ID: "stock-lookup", Name: "Stock Lookup"}},
+		); err != nil {
+			t.Fatalf("RecordSearch %d: %v", i, err)
+		}
 	}
 
 	got, err := c.Search(".*", "", 10, 0)

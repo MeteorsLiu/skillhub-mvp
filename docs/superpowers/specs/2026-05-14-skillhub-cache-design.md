@@ -86,15 +86,9 @@ search(query):
   if matching promoted results exist and are not expired:
     return cached results
 
-  find similar observations with BM25
-  if promotion rule is satisfied:
-    call discovery once
-    write latest discovery results to promoted cache with 24h TTL
-    write observation
-    return fresh results
-
   call discovery
-  write observation only
+  RecordSearch writes the observation
+  RecordSearch automatically writes promoted results with 24h TTL if the promotion rule is satisfied
   return fresh results
 ```
 

@@ -4,7 +4,7 @@
 
 **Goal:** Add promoted local search caching for SkillHub MCP search using query observations, SQLite FTS5/BM25, and result-stability promotion.
 
-**Architecture:** MCP owns SQLite search-cache data only. `cache.Search` performs tokenizer-backed SQLite FTS5/BM25 lookup over promoted search results, while query observations decide when remote discovery results become cacheable for 24 hours. Skill package loading and sub-skill resolution use `$SKILLHUB_HOME/skills/...` paths directly and do not depend on SQLite metadata.
+**Architecture:** MCP owns SQLite search-cache data only. `cache.Search` performs tokenizer-backed SQLite FTS5/BM25 lookup over promoted search results, while `cache.RecordSearch` writes observations and automatically promotes stable remote discovery results for 24 hours. Skill package loading and sub-skill resolution use `$SKILLHUB_HOME/skills/...` paths directly and do not depend on SQLite metadata.
 
 **Tech Stack:** Go 1.25, `modernc.org/sqlite` FTS5/BM25, `github.com/go-ego/gse`, embedded jieba official dictionary, existing `skillhub/pkg/types`.
 
