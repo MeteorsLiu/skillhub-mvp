@@ -328,3 +328,22 @@ func TestUpsert_Update(t *testing.T) {
 		t.Errorf("expected version 'v2.0.0', got %q", results[0].Version)
 	}
 }
+
+func TestTokenizer_ChineseAndASCIITokens(t *testing.T) {
+	tok, err := cache.NewTokenizer()
+	if err != nil {
+		t.Fatalf("NewTokenizer: %v", err)
+	}
+
+	tokens := tok.Tokens("小红书浦东明珠租房补贴 pgvector API")
+	got := map[string]bool{}
+	for _, token := range tokens {
+		got[token] = true
+	}
+
+	for _, want := range []string{"小红书", "浦东", "明珠", "租房", "补贴", "pgvector", "api"} {
+		if !got[want] {
+			t.Fatalf("missing token %q from %#v", want, tokens)
+		}
+	}
+}
