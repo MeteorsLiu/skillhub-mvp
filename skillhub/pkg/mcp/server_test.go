@@ -114,16 +114,48 @@ func TestSearchToolDescribesTagAndDescriptionSemantics(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"Workflow:",
-		"SkillHub helps agents find skills that teach them how to do EVERYTHING",
-		"Would a specialized skill make this task easier, safer, more complete, or more accurate",
-		"Web search finds information. SkillHub teaches you how to do the task",
-		"Use skillhub__search before web_search, web_fetch, browser, shell, file tools, or code execution when the task is more than simply retrieving one fact",
-		"English broad skill area hint. Not regex",
-		"English regex pattern for the specific user intent",
+		"SkillHub fills capability gaps",
+		"teach them how to do EVERYTHING",
+		"For every user request, check whether an existing skill could improve the result",
+		"ALWAYS assume a relevant specialized skill may exist",
+		"MUST search SkillHub FIRST",
+		"Do not load, install, or execute a skill until the user confirms",
+		"Natural-language broad skill area hint",
+		"Natural-language description of the specific user intent",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("tool metadata missing %q in %s", want, text)
+		}
+	}
+}
+
+func TestLoadToolDescribesResourceDirectory(t *testing.T) {
+	srv := skillhubmcp.NewServer(&mockTools{})
+	tools := listTools(t, srv)
+
+	var load *mcp.Tool
+	for i := range tools {
+		if tools[i].Name == "load" {
+			load = &tools[i]
+			break
+		}
+	}
+	if load == nil {
+		t.Fatal("missing load")
+	}
+
+	data, err := json.Marshal(load)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"resource_directory",
+		"resources only",
+		"For SkillHub results and sub-skills, use load to get instructions",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("load metadata missing %q in %s", want, text)
 		}
 	}
 }
@@ -173,7 +205,13 @@ func TestLoad(t *testing.T) {
 			if req.ID != "test" {
 				t.Errorf("expected id 'test', got %q", req.ID)
 			}
-			return &types.Skill{ID: "test", Name: "Test", Version: "v1.0.0", Body: "content"}, nil
+			return &types.Skill{
+				ID:                "test",
+				Name:              "Test",
+				Version:           "v1.0.0",
+				Body:              "content",
+				ResourceDirectory: "/tmp/.llar/test@v1.0.0",
+			}, nil
 		},
 	})
 	result := callTool(t, srv, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"load","arguments":{"id":"test"}}}`)
@@ -193,6 +231,9 @@ func TestLoad(t *testing.T) {
 	}
 	if skill.ID != "test" || skill.Name != "Test" {
 		t.Errorf("unexpected skill: %+v", skill)
+	}
+	if skill.ResourceDirectory != "/tmp/.llar/test@v1.0.0" {
+		t.Errorf("unexpected resource directory: %q", skill.ResourceDirectory)
 	}
 }
 

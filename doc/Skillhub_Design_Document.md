@@ -231,7 +231,8 @@ type SkillHubTools interface {
 
 - root skill：`id = root skill 路径`
 - sub skill：`id = root skill 路径 + "/" + 相对路径`
-- 返回当前 skill 的正文、`sub_skills`、`deps.skills`、`deps.tools`
+- 返回当前 skill 的正文、`resource_directory`、`sub_skills`、`deps.skills`、`deps.tools`
+- `resource_directory` 只包含辅助资源文件，不包含任何 `SKILL.md`
 - `deps` 返回当前 skill 自己声明的依赖
 
 ### 4.3 MCP 接入
@@ -284,6 +285,7 @@ type SkillHubTools interface {
   "name": "发布小红书图文",
   "version": "v1.4.2",
   "body": "... publish-post 的正文 ...",
+  "resource_directory": "/tmp/.llar/github.com/acme/clawhub/social/publish-post@v1.4.2",
   "sub_skills": [
     {
       "id": "github.com/acme/clawhub/social/publish-post/draft-post",
@@ -513,6 +515,13 @@ $SKILLHUB_HOME/skills/github.com/acme/clawhub/social/publish-post/v1.4.2/
    - root `SKILL.md`
    - 本地 `skills/`
    - 外部依赖 root skill
+4. 复制辅助资源到：
+
+```text
+/tmp/.llar/github.com/acme/clawhub/social/publish-post@v1.4.2/
+```
+
+该目录排除所有 `SKILL.md`。模型需要 skill 指令时必须继续通过 `skillhub_load` 加载 root skill 或 sub skill。
 
 #### 再次加载同一个 root skill
 

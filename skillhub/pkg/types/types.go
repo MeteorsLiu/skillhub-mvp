@@ -47,12 +47,13 @@ type SkillDeps struct {
 }
 
 type Skill struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Version   string         `json:"version"`
-	Body      string         `json:"body"`
-	SubSkills []SkillSummary `json:"sub_skills,omitempty"`
-	Deps      SkillDeps      `json:"deps"`
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Version           string         `json:"version"`
+	Body              string         `json:"body"`
+	ResourceDirectory string         `json:"resource_directory,omitempty"`
+	SubSkills         []SkillSummary `json:"sub_skills,omitempty"`
+	Deps              SkillDeps      `json:"deps"`
 }
 
 type SkillHubTools interface {
