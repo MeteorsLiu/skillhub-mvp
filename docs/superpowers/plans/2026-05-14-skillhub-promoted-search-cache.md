@@ -4,7 +4,7 @@
 
 **Goal:** Add promoted local search caching for SkillHub MCP search using query observations, SQLite FTS5/BM25, and result-stability promotion.
 
-**Architecture:** MCP remains the owner of search/load cache data. The existing `cache.Search` local skill lookup stays in place for dependency/name lookup, while new promoted search-cache APIs handle remote-search observations and 24h promoted result reuse. Discovery remains the freshness source: first searches only record observations, and promotion still calls discovery once before writing a cache entry.
+**Architecture:** MCP remains the owner of search/load cache data. `cache.Search` uses the same tokenizer-backed SQLite FTS5/BM25 local lookup used by the cache layer, while promoted search-cache APIs handle remote-search observations and 24h promoted result reuse. Discovery remains the freshness source: first searches only record observations, and promotion still calls discovery once before writing a cache entry.
 
 **Tech Stack:** Go 1.25, `modernc.org/sqlite` FTS5/BM25, `github.com/go-ego/gse`, embedded jieba official dictionary, existing `skillhub/pkg/types`.
 
@@ -17,7 +17,7 @@
 - Create: `skillhub/pkg/cache/jieba.dict.txt`
   - Embedded jieba official dictionary used by tokenizer.
 - Create: `skillhub/pkg/cache/search_cache.go`
-  - Owns observation schema, promoted result schema, BM25 observation lookup, weighted result-stability scoring, promoted cache read/write APIs, and cleanup.
+  - Owns local skill FTS schema, observation schema, promoted result schema, BM25 lookup, weighted result-stability scoring, promoted cache read/write APIs, and cleanup.
 - Modify: `skillhub/pkg/cache/cache.go`
   - Initialize promoted search-cache schema/tokenizer from `Open`.
 - Modify: `skillhub/pkg/cache/cache_test.go`
@@ -1038,5 +1038,5 @@ If no fixes were needed, skip this step.
 
 - Spec coverage: The plan implements SQLite FTS5/BM25 query observations, gse + embedded jieba dictionary tokenization, 3-observation promotion, weighted result stability, 24h promoted cache TTL, discovery refresh before promotion write, and load/skill cache separation.
 - Scope boundary: The plan does not implement OpenClaw loaded injection; that remains a separate plugin-owned feature from the design.
-- Regression guard: Existing `cache.Search` remains unchanged for dependency lookup and local skill metadata search. MCP `Search` changes only the remote-search path and uses discovery as fallback/freshness source.
+- Regression guard: `cache.Search` now uses tokenizer-backed FTS5/BM25 instead of regex/LIKE. MCP `Search` uses discovery as fallback/freshness source and only returns promoted cache entries after the stability gate.
 - Placeholder scan: No placeholders or TBD items remain.

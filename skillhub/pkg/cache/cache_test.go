@@ -72,7 +72,7 @@ func TestUpsert_AffectsRow(t *testing.T) {
 	}
 }
 
-func TestSearch_RegexMatch(t *testing.T) {
+func TestSearch_TokenizedDescriptionMatch(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	skillsRoot := filepath.Join(dir, "skills")
@@ -176,7 +176,7 @@ func TestSearch_TagIsNotRegex(t *testing.T) {
 	}
 }
 
-func TestSearch_AllMatchDescriptionRequiresTag(t *testing.T) {
+func TestSearch_RegexLikeDescriptionDoesNotEnumerateRows(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	skillsRoot := filepath.Join(dir, "skills")
@@ -187,9 +187,13 @@ func TestSearch_AllMatchDescriptionRequiresTag(t *testing.T) {
 	}
 	defer c.Close()
 
-	_, err = c.Search(".*", "", 10, 0)
-	if err == nil {
-		t.Fatal("expected all-match description without tag to fail")
+	c.Upsert(types.SkillSummary{ID: "finance", Name: "Stock Lookup", Tags: []string{"finance"}}, "local")
+	results, err := c.Search(".*", "", 10, 0)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected regex-like description not to enumerate rows, got %+v", results)
 	}
 }
 

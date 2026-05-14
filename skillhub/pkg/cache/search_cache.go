@@ -60,6 +60,106 @@ func (c *Cache) initSearchCacheSchema() error {
 	return nil
 }
 
+func (c *Cache) initSkillSearchSchema() error {
+	_, err := c.db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(
+		id UNINDEXED,
+		name,
+		description,
+		version UNINDEXED,
+		tags,
+		tokens
+	)`)
+	if err != nil {
+		return err
+	}
+	rows, err := c.db.Query(`SELECT id, name, description, version, tags FROM skills`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		summary, tagsJSON, err := scanSkillSummary(rows)
+		if err != nil {
+			return err
+		}
+		if err := c.upsertSkillFTS(summary, tagsJSON); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (c *Cache) upsertSkillFTS(summary types.SkillSummary, tagsJSON string) error {
+	if summary.ID == "" {
+		return nil
+	}
+	if _, err := c.db.Exec(`DELETE FROM skills_fts WHERE id = ?`, summary.ID); err != nil {
+		return err
+	}
+	tokenText := strings.Join(c.tokenizer.Tokens(summary.ID+" "+summary.Name+" "+summary.Description+" "+strings.Join(summary.Tags, " ")), " ")
+	_, err := c.db.Exec(
+		`INSERT INTO skills_fts(id, name, description, version, tags, tokens) VALUES (?, ?, ?, ?, ?, ?)`,
+		summary.ID, summary.Name, summary.Description, summary.Version, tagsJSON, tokenText,
+	)
+	return err
+}
+
+func (c *Cache) searchSkillsFTS(description, tag string, limit, offset int) ([]types.SkillSummary, error) {
+	queryText := strings.TrimSpace(tag + " " + description)
+	tokens := c.tokenizer.Tokens(queryText)
+	if len(tokens) == 0 {
+		return []types.SkillSummary{}, nil
+	}
+	expr := ftsMatchExpr(tokens)
+	rows, err := c.db.Query(
+		`SELECT id, name, description, version, tags
+		 FROM skills_fts
+		 WHERE skills_fts MATCH ?
+		 ORDER BY bm25(skills_fts, 5.0, 4.0, 3.0, 1.0, 1.0, 4.0)
+		 LIMIT ? OFFSET ?`,
+		expr, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []types.SkillSummary
+	for rows.Next() {
+		summary, _, err := scanSkillSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range result {
+		resultOffset := offset + i
+		result[i].Offset = &resultOffset
+	}
+	if result == nil {
+		return []types.SkillSummary{}, nil
+	}
+	return result, nil
+}
+
+type skillSummaryScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSkillSummary(scanner skillSummaryScanner) (types.SkillSummary, string, error) {
+	var s types.SkillSummary
+	var tagsJSON string
+	if err := scanner.Scan(&s.ID, &s.Name, &s.Description, &s.Version, &tagsJSON); err != nil {
+		return types.SkillSummary{}, "", err
+	}
+	var tags []string
+	_ = json.Unmarshal([]byte(tagsJSON), &tags)
+	s.Tags = tags
+	return s, tagsJSON, nil
+}
+
 func (c *Cache) GetPromotedSearch(req types.SearchRequest) ([]types.SkillSummary, error) {
 	key := c.promotedSearchKey(req)
 	var raw string

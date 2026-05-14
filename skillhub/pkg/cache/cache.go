@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -50,6 +49,9 @@ func Open(dbPath, skillsRoot string) (*Cache, error) {
 	if err := c.initSearchCacheSchema(); err != nil {
 		return nil, fmt.Errorf("init search cache schema: %w", err)
 	}
+	if err := c.initSkillSearchSchema(); err != nil {
+		return nil, fmt.Errorf("init skill search schema: %w", err)
+	}
 	if err := c.syncFromFS(skillsRoot); err != nil {
 		return nil, fmt.Errorf("sync from filesystem: %w", err)
 	}
@@ -63,9 +65,6 @@ func (c *Cache) Close() error {
 func (c *Cache) Search(description, tag string, limit, offset int) ([]types.SkillSummary, error) {
 	description = strings.TrimSpace(description)
 	tag = strings.TrimSpace(tag)
-	if err := validateSearch(description, tag); err != nil {
-		return nil, err
-	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -76,179 +75,7 @@ func (c *Cache) Search(description, tag string, limit, offset int) ([]types.Skil
 		offset = 0
 	}
 
-	var descRe *regexp.Regexp
-	if description != "" {
-		pattern := description
-		parts := searchTokens(description)
-		if len(parts) > 1 {
-			for i, part := range parts {
-				parts[i] = regexp.QuoteMeta(part)
-			}
-			pattern = strings.Join(parts, "|")
-		}
-		var err error
-		descRe, err = regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("compile search regex: %w", err)
-		}
-	}
-
-	var likePattern string
-	if tag == "" && descRe == nil {
-		likePattern = description
-	}
-
-	var rows *sql.Rows
-	var err error
-	if likePattern != "" {
-		rows, err = c.db.Query(
-			`SELECT id, name, description, version, tags FROM skills
-			 WHERE (name || ' ' || description) LIKE '%' || ? || '%' OR tags LIKE '%' || ? || '%'
-			 ORDER BY id`,
-			likePattern, likePattern,
-		)
-	} else {
-		rows, err = c.db.Query(
-			`SELECT id, name, description, version, tags FROM skills ORDER BY id`,
-		)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("search query: %w", err)
-	}
-	defer rows.Close()
-
-	var result []types.SkillSummary
-	for rows.Next() {
-		var s types.SkillSummary
-		var tagsJSON string
-		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Version, &tagsJSON); err != nil {
-			return nil, fmt.Errorf("scan row: %w", err)
-		}
-		var tags []string
-		json.Unmarshal([]byte(tagsJSON), &tags)
-		s.Tags = tags
-		result = append(result, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	if descRe != nil {
-		var filtered []types.SkillSummary
-		for _, s := range result {
-			if descRe.MatchString(s.Name) || descRe.MatchString(s.Description) {
-				filtered = append(filtered, s)
-			}
-		}
-		result = filtered
-	}
-
-	if result == nil {
-		result = []types.SkillSummary{}
-	}
-	if tag != "" {
-		tokens := tagTokens(tag)
-		var filtered []types.SkillSummary
-		for _, s := range result {
-			if tagScore(s, tokens) > 0 {
-				filtered = append(filtered, s)
-			}
-		}
-		result = filtered
-		sort.SliceStable(result, func(i, j int) bool {
-			left := tagScore(result[i], tokens)
-			right := tagScore(result[j], tokens)
-			if left != right {
-				return left > right
-			}
-			return result[i].ID < result[j].ID
-		})
-	} else {
-		rankSummaries(result, searchTokens(description))
-	}
-	if offset >= len(result) {
-		return []types.SkillSummary{}, nil
-	}
-	end := offset + limit
-	if end > len(result) {
-		end = len(result)
-	}
-	result = result[offset:end]
-	for i := range result {
-		resultOffset := offset + i
-		result[i].Offset = &resultOffset
-	}
-	return result, nil
-}
-
-func validateSearch(description, tag string) error {
-	if tag == "" && description == ".*" {
-		return fmt.Errorf("description all-match regex requires tag")
-	}
-	return nil
-}
-
-func tagTokens(tag string) []string {
-	return searchTokens(strings.ToLower(tag))
-}
-
-func tagScore(summary types.SkillSummary, tokens []string) int {
-	if len(tokens) == 0 {
-		return 0
-	}
-	tagText := strings.ToLower(strings.Join(summary.Tags, " "))
-	nameText := strings.ToLower(summary.Name)
-	score := 0
-	for _, token := range tokens {
-		if strings.Contains(tagText, token) {
-			score += 3
-		}
-		if strings.Contains(nameText, token) {
-			score++
-		}
-	}
-	return score
-}
-
-func searchTokens(description string) []string {
-	fields := strings.Fields(description)
-	tokens := make([]string, 0, len(fields))
-	for _, field := range fields {
-		token := strings.Trim(field, " \t\r\n,.;:!?\"'`()[]{}<>")
-		if token != "" {
-			tokens = append(tokens, token)
-		}
-	}
-	return tokens
-}
-
-func rankSummaries(summaries []types.SkillSummary, tokens []string) {
-	if len(tokens) == 0 {
-		return
-	}
-	sort.SliceStable(summaries, func(i, j int) bool {
-		left := summaryScore(summaries[i], tokens)
-		right := summaryScore(summaries[j], tokens)
-		if left != right {
-			return left > right
-		}
-		return summaries[i].ID < summaries[j].ID
-	})
-}
-
-func summaryScore(summary types.SkillSummary, tokens []string) int {
-	nameID := strings.ToLower(summary.Name + " " + summary.ID)
-	text := strings.ToLower(nameID + " " + summary.Description)
-	score := 0
-	for _, token := range tokens {
-		token = strings.ToLower(token)
-		if strings.Contains(nameID, token) {
-			score += 3
-		} else if strings.Contains(text, token) {
-			score++
-		}
-	}
-	return score
+	return c.searchSkillsFTS(description, tag, limit, offset)
 }
 
 func (c *Cache) Upsert(summary types.SkillSummary, source string) error {
@@ -269,7 +96,10 @@ func (c *Cache) Upsert(summary types.SkillSummary, source string) error {
 		summary.ID, summary.Name, summary.Description, summary.Version,
 		string(tagsJSON), source, time.Now().UTC(),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return c.upsertSkillFTS(summary, string(tagsJSON))
 }
 
 func (c *Cache) AllRootIDs() ([]string, error) {
