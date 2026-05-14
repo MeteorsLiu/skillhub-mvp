@@ -7,10 +7,9 @@ Add a simple cache layer that makes SkillHub faster and helps an agent reuse ski
 ## Non-Goals
 
 - Do not add semantic route caching.
-- Do not add BM25 or a local search index in this version.
 - Do not inject globally cached skills into prompts.
 - Do not inject full `SKILL.md` content from cache.
-- Do not replace cloud discovery as the source of fresh search results beyond the short search-cache TTL.
+- Do not let local cache permanently replace cloud discovery for new skill discovery.
 
 ## Architecture
 
@@ -23,7 +22,7 @@ This keeps cache ownership aligned with responsibilities. MCP already owns Skill
 
 ## Search Cache
 
-Search cache is a strict short-TTL cache inside the MCP server.
+Search cache is a promoted local cache inside the MCP server. It uses SQLite FTS5/BM25 for fast local recall, but it does not cache every remote search result. A search result becomes cacheable only after repeated similar searches show stable remote results.
 
 Storage:
 
@@ -31,30 +30,74 @@ Storage:
 $SKILLHUB_HOME/skillhub.db
 ```
 
-Use the existing local SQLite cache database and add dedicated search-cache storage there. `SKILLHUB_HOME` keeps its current default of `$HOME/.skillhub`.
+Use the existing local SQLite cache database and add dedicated search observation and promoted result storage there. `SKILLHUB_HOME` keeps its current default of `$HOME/.skillhub`.
 
-Cache key:
+Tokenization:
 
 ```text
-normalized(id + tag + description + limit + offset)
+gse + embedded jieba official dictionary
 ```
 
-Cache value:
+Use Chinese-aware tokenization before writing query text into FTS. ASCII tokens are lowercased and preserved so tool names, APIs, and English skill terms still match.
+
+Observation value:
 
 ```text
-search results returned by discovery
+query tokens
+top result ids with ranks
+createdAt
+```
+
+Promoted cache value:
+
+```text
+results returned by discovery
+intent tokens used for promotion
 createdAt
 expiresAt
 ```
 
+Promotion rule:
+
+```text
+similar_observations >= 3
+best_result appearance_count >= 2
+best_result average_rank <= 2
+best_result weighted_score / total_weighted_score >= 0.40
+```
+
+Similarity is found by querying the observation FTS table with the current query tokens. Result stability is checked by normalizing the remote top results across similar observations. Rank weights are:
+
+```text
+rank1 = 5
+rank2 = 4
+rank3 = 3
+rank4 = 2
+rank5 = 1
+```
+
+For each similar observation, add the rank weight to that result id. A result is stable only if it appears repeatedly, ranks near the top, and owns enough of the total weighted score. This prevents two superficially similar queries with different remote results from sharing a cache entry.
+
 Behavior:
 
 ```text
-cache hit and not expired -> return cached results
-cache miss or expired -> call discovery -> write cache -> return fresh results
+search(query):
+  if promoted result cache hit and not expired:
+    return cached results
+
+  find similar observations with BM25
+  if promotion rule is satisfied:
+    call discovery once
+    write latest discovery results to promoted cache with 24h TTL
+    write observation
+    return fresh results
+
+  call discovery
+  write observation only
+  return fresh results
 ```
 
-The TTL should be short. Five minutes is the initial default. This cache only avoids repeated identical or near-identical searches over a short period; it must not become a long-lived local discovery replacement.
+The promoted result TTL is 24 hours. This is long enough to avoid repeated discovery calls for stable high-frequency searches, but short enough to let new or better skills surface from cloud discovery.
 
 ## Skill Cache
 
@@ -167,9 +210,11 @@ Search:
 
 ```text
 agent calls skillhub search
-MCP checks search cache
-cache hit -> return cached results
-cache miss -> call discovery -> store short-TTL result -> return
+MCP checks promoted search cache
+promoted hit -> return cached results
+promoted miss -> check observation BM25 stability
+stable repeated query -> call discovery -> store 24h promoted result -> write observation -> return fresh results
+not stable -> call discovery -> write observation only -> return fresh results
 ```
 
 Load:
@@ -204,9 +249,13 @@ plugin injects the loaded-skill list into session context
 
 MCP tests:
 
-- Search cache returns cached results within TTL.
-- Search cache calls discovery after TTL expiry.
-- Search cache key includes id, tag, description, limit, and offset.
+- Search observations are written after discovery search.
+- Promoted search cache is not written for the first matching search.
+- Similar repeated searches promote results after 3 stable observations.
+- Similar searches with split remote results do not promote cache entries.
+- Promoted search cache returns cached results within the 24h TTL.
+- Promoted search cache calls discovery after TTL expiry.
+- Query tokenization handles Chinese terms and ASCII tool/API names.
 - Skill cache returns cached payload for the same id/version.
 - Skill cache does not return an old version when the resolved version changes.
 - Cache read/write failures fall back without breaking search/load.
