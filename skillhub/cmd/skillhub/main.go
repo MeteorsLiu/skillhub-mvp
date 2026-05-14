@@ -231,29 +231,30 @@ type discoverySearcher interface {
 }
 
 func (c *mcpCore) splitSubSkill(id string) (rootID, subPath string) {
-	if c.cache == nil {
-		return id, ""
-	}
-	ids, err := c.cache.AllRootIDs()
-	if err != nil || len(ids) == 0 {
-		return id, ""
-	}
-	for _, root := range ids {
-		if id == root {
-			return root, ""
-		}
-		prefix := root + "/"
-		if strings.HasPrefix(id, prefix) {
-			return root, id[len(prefix):]
-		}
+	home := skillHubHome()
+	skillsRoot := filepath.Join(home, "skills")
+	root, sub := splitInstalledSubSkill(skillsRoot, id)
+	if root != "" {
+		return root, sub
 	}
 	return id, ""
 }
 
+func splitInstalledSubSkill(skillsRoot, id string) (rootID, subPath string) {
+	parts := strings.Split(id, "/")
+	for i := len(parts); i >= 3; i-- {
+		candidate := filepath.Join(append([]string{skillsRoot}, parts[:i]...)...)
+		if latest := selectInstalledVersion(candidate); latest != "" {
+			return strings.Join(parts[:i], "/"), strings.Join(parts[i:], "/")
+		}
+	}
+	return "", ""
+}
+
 func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) {
 	if c.cache != nil {
-		cached, err := c.cache.GetPromotedSearch(req)
-		if err == nil && cached != nil {
+		cached, err := c.cache.Search(req.Description, req.Tag, req.Limit, req.Offset)
+		if err == nil && len(cached) > 0 {
 			return cached, nil
 		}
 	}
@@ -276,9 +277,6 @@ func (c *mcpCore) Search(req types.SearchRequest) ([]types.SkillSummary, error) 
 			_ = c.cache.PutPromotedSearch(req, out)
 		}
 		_ = c.cache.RecordSearchObservation(req, out)
-		for _, r := range out {
-			_ = c.cache.Upsert(r, "remote")
-		}
 	}
 
 	return out, nil
@@ -354,25 +352,6 @@ func (c *mcpCore) Load(req types.LoadRequest) (*types.Skill, error) {
 		return nil, fmt.Errorf("prepare resource directory: %w", err)
 	}
 	skill.ResourceDirectory = resourceDir
-
-	if c.cache != nil {
-		c.cache.Upsert(types.SkillSummary{
-			ID:          skill.ID,
-			Name:        skill.Name,
-			Description: extractFirstLine(skill.Body),
-			Version:     skill.Version,
-		}, "local")
-
-		for i, dep := range skill.Deps.Skills {
-			depResults, _ := c.cache.Search(dep.ID, "", 1, 0)
-			for _, r := range depResults {
-				if r.ID == dep.ID {
-					skill.Deps.Skills[i].Name = r.Name
-					skill.Deps.Skills[i].Description = r.Description
-				}
-			}
-		}
-	}
 
 	return skill, nil
 }

@@ -2,13 +2,8 @@ package cache
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -20,26 +15,13 @@ type Cache struct {
 	tokenizer *Tokenizer
 }
 
-func Open(dbPath, skillsRoot string) (*Cache, error) {
+func Open(dbPath, _ string) (*Cache, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping sqlite: %w", err)
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS skills (
-		id          TEXT PRIMARY KEY,
-		name        TEXT NOT NULL DEFAULT '',
-		description TEXT NOT NULL DEFAULT '',
-		version     TEXT NOT NULL DEFAULT '',
-		tags        TEXT NOT NULL DEFAULT '[]',
-		status      TEXT NOT NULL DEFAULT '',
-		source      TEXT NOT NULL DEFAULT '',
-		created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`); err != nil {
-		return nil, fmt.Errorf("create table: %w", err)
 	}
 	tok, err := NewTokenizer()
 	if err != nil {
@@ -48,12 +30,6 @@ func Open(dbPath, skillsRoot string) (*Cache, error) {
 	c := &Cache{db: db, tokenizer: tok}
 	if err := c.initSearchCacheSchema(); err != nil {
 		return nil, fmt.Errorf("init search cache schema: %w", err)
-	}
-	if err := c.initSkillSearchSchema(); err != nil {
-		return nil, fmt.Errorf("init skill search schema: %w", err)
-	}
-	if err := c.syncFromFS(skillsRoot); err != nil {
-		return nil, fmt.Errorf("sync from filesystem: %w", err)
 	}
 	return c, nil
 }
@@ -74,114 +50,5 @@ func (c *Cache) Search(description, tag string, limit, offset int) ([]types.Skil
 	if offset < 0 {
 		offset = 0
 	}
-
-	return c.searchSkillsFTS(description, tag, limit, offset)
-}
-
-func (c *Cache) Upsert(summary types.SkillSummary, source string) error {
-	tagsJSON, _ := json.Marshal(summary.Tags)
-	if summary.Tags == nil {
-		tagsJSON = []byte("[]")
-	}
-	_, err := c.db.Exec(
-		`INSERT INTO skills (id, name, description, version, tags, source, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET
-		   name = excluded.name,
-		   description = excluded.description,
-		   version = excluded.version,
-		   tags = excluded.tags,
-		   source = excluded.source,
-		   updated_at = excluded.updated_at`,
-		summary.ID, summary.Name, summary.Description, summary.Version,
-		string(tagsJSON), source, time.Now().UTC(),
-	)
-	if err != nil {
-		return err
-	}
-	return c.upsertSkillFTS(summary, string(tagsJSON))
-}
-
-func (c *Cache) AllRootIDs() ([]string, error) {
-	rows, err := c.db.Query(`SELECT id FROM skills ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
-func (c *Cache) syncFromFS(skillsRoot string) error {
-	if skillsRoot == "" {
-		return nil
-	}
-	return filepath.WalkDir(skillsRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.Name() == "SKILL.md" {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			summary := parseSummary(content, path, skillsRoot)
-			if summary.ID != "" {
-				c.Upsert(summary, "local")
-			}
-		}
-		return nil
-	})
-}
-
-func parseSummary(content []byte, path, skillsRoot string) types.SkillSummary {
-	s := string(content)
-	parts := strings.SplitN(s, "---", 3)
-	if len(parts) < 3 {
-		return types.SkillSummary{}
-	}
-	var fm struct {
-		ID          string
-		Name        string
-		Description string
-	}
-	lines := strings.Split(parts[1], "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "id:") {
-			fm.ID = strings.TrimSpace(line[3:])
-		} else if strings.HasPrefix(line, "name:") {
-			fm.Name = strings.TrimSpace(line[5:])
-		} else if strings.HasPrefix(line, "description:") {
-			fm.Description = strings.TrimSpace(line[12:])
-		}
-	}
-	if fm.ID == "" {
-		return types.SkillSummary{}
-	}
-
-	var version string
-	rel, _ := filepath.Rel(skillsRoot, path)
-	parts2 := strings.Split(rel, string(filepath.Separator))
-	for _, p := range parts2 {
-		if strings.HasPrefix(p, "v") {
-			if matched, _ := regexp.MatchString(`^v\d+\.\d+\.\d+`, p); matched {
-				version = p
-			}
-		}
-	}
-
-	return types.SkillSummary{
-		ID:          fm.ID,
-		Name:        fm.Name,
-		Description: fm.Description,
-		Version:     version,
-	}
+	return c.searchPromotedResults(description, tag, limit, offset)
 }

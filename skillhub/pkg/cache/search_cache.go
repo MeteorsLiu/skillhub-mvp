@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"database/sql"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -14,7 +13,7 @@ const promotedSearchTTL = 24 * time.Hour
 
 type searchObservationResult struct {
 	ID   string `json:"id"`
-	Rank int    `json:"rank"`
+	Rank int    `json:"result_order"`
 }
 
 type searchObservation struct {
@@ -44,12 +43,16 @@ func (c *Cache) initSearchCacheSchema() error {
 			content='search_observations',
 			content_rowid='id'
 		)`,
-		`CREATE TABLE IF NOT EXISTS promoted_search_cache (
-			cache_key TEXT PRIMARY KEY,
-			query_tokens TEXT NOT NULL,
-			results_json TEXT NOT NULL,
-			created_at DATETIME NOT NULL,
-			expires_at DATETIME NOT NULL
+		`CREATE VIRTUAL TABLE IF NOT EXISTS promoted_search_results_fts USING fts5(
+			cache_key UNINDEXED,
+			result_order UNINDEXED,
+			id UNINDEXED,
+			name,
+			description,
+			version UNINDEXED,
+			tags,
+			tokens,
+			expires_at UNINDEXED
 		)`,
 	}
 	for _, stmt := range stmts {
@@ -60,64 +63,27 @@ func (c *Cache) initSearchCacheSchema() error {
 	return nil
 }
 
-func (c *Cache) initSkillSearchSchema() error {
-	_, err := c.db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(
-		id UNINDEXED,
-		name,
-		description,
-		version UNINDEXED,
-		tags,
-		tokens
-	)`)
-	if err != nil {
-		return err
-	}
-	rows, err := c.db.Query(`SELECT id, name, description, version, tags FROM skills`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		summary, tagsJSON, err := scanSkillSummary(rows)
-		if err != nil {
-			return err
-		}
-		if err := c.upsertSkillFTS(summary, tagsJSON); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
-}
-
-func (c *Cache) upsertSkillFTS(summary types.SkillSummary, tagsJSON string) error {
-	if summary.ID == "" {
-		return nil
-	}
-	if _, err := c.db.Exec(`DELETE FROM skills_fts WHERE id = ?`, summary.ID); err != nil {
-		return err
-	}
-	tokenText := strings.Join(c.tokenizer.Tokens(summary.ID+" "+summary.Name+" "+summary.Description+" "+strings.Join(summary.Tags, " ")), " ")
-	_, err := c.db.Exec(
-		`INSERT INTO skills_fts(id, name, description, version, tags, tokens) VALUES (?, ?, ?, ?, ?, ?)`,
-		summary.ID, summary.Name, summary.Description, summary.Version, tagsJSON, tokenText,
-	)
-	return err
-}
-
-func (c *Cache) searchSkillsFTS(description, tag string, limit, offset int) ([]types.SkillSummary, error) {
+func (c *Cache) searchPromotedResults(description, tag string, limit, offset int) ([]types.SkillSummary, error) {
+	_, _ = c.db.Exec(`DELETE FROM promoted_search_results_fts WHERE expires_at <= ?`, time.Now().UTC().Format(time.RFC3339Nano))
 	queryText := strings.TrimSpace(tag + " " + description)
 	tokens := c.tokenizer.Tokens(queryText)
 	if len(tokens) == 0 {
 		return []types.SkillSummary{}, nil
 	}
-	expr := ftsMatchExpr(tokens)
 	rows, err := c.db.Query(
-		`SELECT id, name, description, version, tags
-		 FROM skills_fts
-		 WHERE skills_fts MATCH ?
-		 ORDER BY bm25(skills_fts, 5.0, 4.0, 3.0, 1.0, 1.0, 4.0)
+		`WITH best_cache AS (
+		   SELECT cache_key
+		   FROM promoted_search_results_fts
+		   WHERE promoted_search_results_fts MATCH ? AND expires_at > ?
+		   ORDER BY bm25(promoted_search_results_fts, 1.0, 1.0, 5.0, 4.0, 3.0, 1.0, 1.0, 4.0, 1.0)
+		   LIMIT 1
+		 )
+		 SELECT id, name, description, version, tags
+		 FROM promoted_search_results_fts
+		 WHERE cache_key = (SELECT cache_key FROM best_cache)
+		 ORDER BY CAST(result_order AS INTEGER)
 		 LIMIT ? OFFSET ?`,
-		expr, limit, offset,
+		ftsMatchExpr(tokens), time.Now().UTC().Format(time.RFC3339Nano), limit, offset,
 	)
 	if err != nil {
 		return nil, err
@@ -125,7 +91,7 @@ func (c *Cache) searchSkillsFTS(description, tag string, limit, offset int) ([]t
 	defer rows.Close()
 	var result []types.SkillSummary
 	for rows.Next() {
-		summary, _, err := scanSkillSummary(rows)
+		summary, err := scanPromotedSummary(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -144,63 +110,33 @@ func (c *Cache) searchSkillsFTS(description, tag string, limit, offset int) ([]t
 	return result, nil
 }
 
-type skillSummaryScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanSkillSummary(scanner skillSummaryScanner) (types.SkillSummary, string, error) {
-	var s types.SkillSummary
-	var tagsJSON string
-	if err := scanner.Scan(&s.ID, &s.Name, &s.Description, &s.Version, &tagsJSON); err != nil {
-		return types.SkillSummary{}, "", err
-	}
-	var tags []string
-	_ = json.Unmarshal([]byte(tagsJSON), &tags)
-	s.Tags = tags
-	return s, tagsJSON, nil
-}
-
-func (c *Cache) GetPromotedSearch(req types.SearchRequest) ([]types.SkillSummary, error) {
-	key := c.promotedSearchKey(req)
-	var raw string
-	var expiresAt time.Time
-	err := c.db.QueryRow(`SELECT results_json, expires_at FROM promoted_search_cache WHERE cache_key = ?`, key).Scan(&raw, &expiresAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !time.Now().UTC().Before(expiresAt) {
-		_, _ = c.db.Exec(`DELETE FROM promoted_search_cache WHERE cache_key = ?`, key)
-		return nil, nil
-	}
-	var results []types.SkillSummary
-	if err := json.Unmarshal([]byte(raw), &results); err != nil {
-		return nil, err
-	}
-	return applyLimitOffset(results, req.Limit, req.Offset), nil
-}
-
 func (c *Cache) PutPromotedSearch(req types.SearchRequest, results []types.SkillSummary) error {
 	key := c.promotedSearchKey(req)
-	tokens := strings.Join(c.searchTokens(req), " ")
-	raw, err := json.Marshal(results)
+	if _, err := c.db.Exec(`DELETE FROM promoted_search_results_fts WHERE cache_key = ?`, key); err != nil {
+		return err
+	}
+	expiresAt := time.Now().UTC().Add(promotedSearchTTL).Format(time.RFC3339Nano)
+	intentTokens := strings.Join(c.searchTokens(req), " ")
+	tx, err := c.db.Begin()
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	_, err = c.db.Exec(
-		`INSERT INTO promoted_search_cache (cache_key, query_tokens, results_json, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(cache_key) DO UPDATE SET
-		   query_tokens = excluded.query_tokens,
-		   results_json = excluded.results_json,
-		   created_at = excluded.created_at,
-		   expires_at = excluded.expires_at`,
-		key, tokens, string(raw), now, now.Add(promotedSearchTTL),
-	)
-	return err
+	defer tx.Rollback()
+	for i, result := range results {
+		tagsJSON, _ := json.Marshal(result.Tags)
+		if result.Tags == nil {
+			tagsJSON = []byte("[]")
+		}
+		tokenText := strings.Join(c.tokenizer.Tokens(intentTokens+" "+result.ID+" "+result.Name+" "+result.Description+" "+strings.Join(result.Tags, " ")), " ")
+		if _, err := tx.Exec(
+			`INSERT INTO promoted_search_results_fts(cache_key, result_order, id, name, description, version, tags, tokens, expires_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			key, i, result.ID, result.Name, result.Description, result.Version, string(tagsJSON), tokenText, expiresAt,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (c *Cache) RecordSearchObservation(req types.SearchRequest, results []types.SkillSummary) error {
@@ -258,7 +194,6 @@ func (c *Cache) similarObservations(req types.SearchRequest, limit int) ([]searc
 	if len(tokens) == 0 {
 		return nil, nil
 	}
-	expr := ftsMatchExpr(tokens)
 	rows, err := c.db.Query(
 		`SELECT o.id, bm25(search_observations_fts) AS score, o.results_json
 		 FROM search_observations_fts
@@ -266,7 +201,7 @@ func (c *Cache) similarObservations(req types.SearchRequest, limit int) ([]searc
 		 WHERE search_observations_fts MATCH ?
 		 ORDER BY score
 		 LIMIT ?`,
-		expr, limit,
+		ftsMatchExpr(tokens), limit,
 	)
 	if err != nil {
 		return nil, err
@@ -328,8 +263,8 @@ func stableObservationResults(observations []searchObservation) bool {
 	return best.appearances >= 2 && avgRank <= 2 && best.score/total >= 0.40
 }
 
-func rankWeight(rank int) int {
-	switch rank {
+func rankWeight(result_order int) int {
+	switch result_order {
 	case 1:
 		return 5
 	case 2:
@@ -357,29 +292,20 @@ func (c *Cache) promotedSearchKey(req types.SearchRequest) string {
 	return strings.Join(c.searchTokens(req), " ")
 }
 
-func applyLimitOffset(results []types.SkillSummary, limit, offset int) []types.SkillSummary {
-	if limit <= 0 {
-		limit = 100
+type promotedSummaryScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPromotedSummary(scanner promotedSummaryScanner) (types.SkillSummary, error) {
+	var s types.SkillSummary
+	var tagsJSON string
+	if err := scanner.Scan(&s.ID, &s.Name, &s.Description, &s.Version, &tagsJSON); err != nil {
+		return types.SkillSummary{}, err
 	}
-	if limit > 100 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(results) {
-		return []types.SkillSummary{}
-	}
-	end := offset + limit
-	if end > len(results) {
-		end = len(results)
-	}
-	out := append([]types.SkillSummary(nil), results[offset:end]...)
-	for i := range out {
-		resultOffset := offset + i
-		out[i].Offset = &resultOffset
-	}
-	return out
+	var tags []string
+	_ = json.Unmarshal([]byte(tagsJSON), &tags)
+	s.Tags = tags
+	return s, nil
 }
 
 func minInt(a, b int) int {

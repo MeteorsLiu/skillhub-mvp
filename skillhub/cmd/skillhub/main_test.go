@@ -77,6 +77,19 @@ func TestCmdSearchUsesNaturalLanguageQuery(t *testing.T) {
 	}
 }
 
+func TestSplitInstalledSubSkillUsesFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := filepath.Join(dir, "github.com", "acme", "repo", "v1.0.0")
+	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	root, sub := splitInstalledSubSkill(dir, "github.com/acme/repo/travel/planner")
+	if root != "github.com/acme/repo" || sub != "travel/planner" {
+		t.Fatalf("unexpected split root=%q sub=%q", root, sub)
+	}
+}
+
 func (f *fakeDiscoverySearchClient) Search(ctx context.Context, req discoveryclient.SearchRequest) ([]discoveryclient.SkillSummary, error) {
 	f.called = true
 	f.callCount++
@@ -126,7 +139,7 @@ func TestMCPSearchFirstCallUsesDiscoveryAndRecordsObservation(t *testing.T) {
 	}
 }
 
-func TestMCPSearchReturnsPromotedCacheHitWithoutDiscovery(t *testing.T) {
+func TestMCPSearchReturnsBM25CacheHitWithoutDiscovery(t *testing.T) {
 	dir := t.TempDir()
 	c, err := cachepkg.Open(filepath.Join(dir, "skillhub.db"), filepath.Join(dir, "skills"))
 	if err != nil {
@@ -146,7 +159,7 @@ func TestMCPSearchReturnsPromotedCacheHitWithoutDiscovery(t *testing.T) {
 		t.Fatalf("search: %v", err)
 	}
 	if client.called {
-		t.Fatal("promoted cache hit should not call discovery")
+		t.Fatal("BM25 cache hit should not call discovery")
 	}
 	if len(results) != 1 || results[0].ID != "cached" {
 		t.Fatalf("expected cached result, got %+v", results)
@@ -198,7 +211,7 @@ func TestMCPSearchStableObservationsRefreshesDiscoveryThenCaches(t *testing.T) {
 		t.Fatalf("second search: %v", err)
 	}
 	if client.called {
-		t.Fatal("second search should hit promoted cache")
+		t.Fatal("second search should hit BM25 cache")
 	}
 	if len(results) != 1 || results[0].ID != "fresh-xhs" {
 		t.Fatalf("expected cached fresh result, got %+v", results)

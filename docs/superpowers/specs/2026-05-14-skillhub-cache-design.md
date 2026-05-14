@@ -15,10 +15,10 @@ Add a simple cache layer that makes SkillHub faster and helps an agent reuse ski
 
 Use a hybrid implementation:
 
-- MCP owns data caches for `search` and `load`.
+- MCP owns promoted search cache and filesystem skill package resolution.
 - The OpenClaw plugin owns session-level loaded-skill injection.
 
-This keeps cache ownership aligned with responsibilities. MCP already owns SkillHub tool execution and skill package resolution, so it should own search and load caches. The plugin owns prompt lifecycle hooks, so it should own what gets injected into the session context.
+This keeps cache ownership aligned with responsibilities. MCP owns SkillHub tool execution, promoted search cache, and filesystem skill package resolution. SQLite cache storage is only for search observations and promoted BM25 results. The plugin owns prompt lifecycle hooks, so it should own what gets injected into the session context.
 
 ## Search Cache
 
@@ -82,7 +82,8 @@ Behavior:
 
 ```text
 search(query):
-  if promoted result cache hit and not expired:
+  search promoted result cache with BM25
+  if matching promoted results exist and are not expired:
     return cached results
 
   find similar observations with BM25
@@ -99,9 +100,9 @@ search(query):
 
 The promoted result TTL is 24 hours. This is long enough to avoid repeated discovery calls for stable high-frequency searches, but short enough to let new or better skills surface from cloud discovery.
 
-## Skill Cache
+## Skill Package Cache
 
-Skill cache is a long-lived cache inside the MCP server.
+Skill packages are cached on disk by `load`, but they are not managed by the SQLite cache module. The SQLite cache is only for search observations and promoted BM25 search results.
 
 Storage:
 
@@ -117,31 +118,18 @@ Cache key:
 skill id + version
 ```
 
-Cache value:
-
-```text
-loaded skill payload
-parsed metadata
-sub_skills metadata when present
-resource cache metadata
-createdAt
-lastAccessedAt
-```
-
 Behavior:
 
 ```text
 load(id):
   resolve the requested skill version
-  if cache contains id + version:
-    return cached payload
+  if $SKILLHUB_HOME/skills/{id-path}/{version}/ exists:
+    parse and load from disk
   else:
-    fetch/parse/prepare resources
-    write cache
-    return fresh payload
+    fetch into that path, then parse and load
 ```
 
-If a later load resolves the same `id` to a different `version`, the MCP server should stop using the old entry for that id and write a new entry. The old entry may be deleted immediately or pruned by cache cleanup; it must not be returned for the new version.
+Sub-skill resolution also uses the installed skill directory layout. It should not depend on SQLite metadata.
 
 ## Loaded Injection
 
@@ -211,7 +199,7 @@ Search:
 ```text
 agent calls skillhub search
 MCP checks promoted search cache
-promoted hit -> return cached results
+BM25 promoted hit -> return cached results
 promoted miss -> check observation BM25 stability
 stable repeated query -> call discovery -> store 24h promoted result -> write observation -> return fresh results
 not stable -> call discovery -> write observation only -> return fresh results
@@ -222,9 +210,9 @@ Load:
 ```text
 agent calls skillhub load(id)
 MCP resolves id/version
-MCP checks skill cache
-cache hit -> return cached load payload
-cache miss -> fetch/parse/prepare -> store -> return
+MCP checks $SKILLHUB_HOME/skills/{id-path}/{version}/
+disk hit -> parse and return
+disk miss -> fetch to disk -> parse and return
 plugin observes successful load and records session loaded entry
 ```
 
@@ -240,8 +228,7 @@ plugin injects the loaded-skill list into session context
 ## Failure Handling
 
 - Search cache failures must not fail `search`; fall back to discovery.
-- Skill cache read failures must not fail `load`; fetch and parse normally.
-- Skill cache write failures should be logged but must not fail `load`.
+- Disk package cache read failures must not fail `load`; fetch and parse normally when possible.
 - Loaded injection failures must not fail prompt construction; skip the injection and log.
 - If context-window size is unknown, use the `4096` character budget.
 
@@ -256,8 +243,8 @@ MCP tests:
 - Promoted search cache returns cached results within the 24h TTL.
 - Promoted search cache calls discovery after TTL expiry.
 - Query tokenization handles Chinese terms and ASCII tool/API names.
-- Skill cache returns cached payload for the same id/version.
-- Skill cache does not return an old version when the resolved version changes.
+- `load` resolves installed root and sub-skill paths from the filesystem.
+- `load` does not depend on SQLite metadata to identify installed skills.
 - Cache read/write failures fall back without breaking search/load.
 
 Plugin tests:
